@@ -1,0 +1,7 @@
+temp/*
+__pycache__/*
+cards/*
+ocr-results/*
+Card_Rank_Images/*
+Card_Rank_Templates/*
+Single_Card_Images/*
