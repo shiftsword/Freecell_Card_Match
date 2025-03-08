@@ -1,6 +1,3 @@
-我将根据当前工程的代码和功能，更新readme.md文件内容，保持原有格式。
-
-```markdown:d:\Documents\code\Freecell_Card_Match\readme.md
 # FreeCell OCR 纸牌识别系统
 
 一个专门用于识别FreeCell(空当接龙)游戏截图并生成标准布局的工具，支持图形界面操作。

@@ -1,66 +1,64 @@
-识别: 11_r.png -> 4_r
-识别: 12_r.png -> Q_r
-识别: 13_r.png -> 2_r
-识别: 14_r.png -> 9_r
-识别: 15_b.png -> T_b
-识别: 16_r.png -> 6_r
-识别: 17_b.png -> T_b
-识别: 21_b.png -> 3_b
-识别: 22_b.png -> A_b
-识别: 23_r.png -> T_r
-识别: 24_r.png -> 5_r
-识别: 25_r.png -> K_r
-识别: 26_b.png -> 9_b
-识别: 27_r.png -> 8_r
-识别: 31_r.png -> 7_r
-识别: 32_b.png -> 5_b
-识别: 33_r.png -> J_r
-识别: 34_r.png -> Q_r
-识别: 35_b.png -> 9_b
-识别: 36_b.png -> 6_b
-识别: 37_b.png -> K_b
-识别: 41_r.png -> A_r
-识别: 42_r.png -> 8_r
-识别: 43_b.png -> 4_b
-识别: 44_r.png -> K_r
-识别: 45_b.png -> Q_b
-识别: 46_r.png -> 6_r
-识别: 47_b.png -> Q_b
-识别: 51_r.png -> J_r
-识别: 52_r.png -> 9_r
-识别: 53_r.png -> 2_r
-识别: 54_r.png -> 5_r
-识别: 55_b.png -> 7_b
-识别: 56_r.png -> 4_r
-识别: 61_b.png -> 7_b
-识别: 62_r.png -> T_r
-识别: 63_b.png -> A_b
-识别: 64_b.png -> 2_b
-识别: 65_b.png -> K_b
-识别: 66_b.png -> 2_b
-识别: 71_r.png -> A_r
-识别: 72_b.png -> J_b
-识别: 73_b.png -> 4_b
-识别: 74_b.png -> 6_b
-识别: 75_r.png -> 7_r
-识别: 76_r.png -> 3_r
-识别: 81_b.png -> 8_b
-识别: 82_b.png -> J_b
-识别: 83_b.png -> 5_b
-识别: 84_b.png -> 8_b
-识别: 85_r.png -> 3_r
-识别: 86_b.png -> 3_b
+识别: 11_b.png -> T_b
+识别: 12_r.png -> K_r
+识别: 13_b.png -> 9_b
+识别: 15_b.png -> 5_b
+识别: 16_r.png -> 4_r
+识别: 17_b.png -> 3_b
+识别: 21_b.png -> K_b
+识别: 22_r.png -> J_r
+识别: 23_b.png -> 3_b
+识别: 24_r.png -> 8_r
+识别: 25_b.png -> A_b
+识别: 26_b.png -> 2_b
+识别: 31_r.png -> 8_r
+识别: 32_b.png -> K_b
+识别: 33_b.png -> 7_b
+识别: 34_r.png -> 6_r
+识别: 35_b.png -> J_b
+识别: 36_r.png -> 9_r
+识别: 37_b.png -> 9_b
+识别: 41_b.png -> 5_b
+识别: 42_r.png -> 3_r
+识别: 43_b.png -> Q_b
+识别: 44_b.png -> 4_b
+识别: 45_b.png -> T_b
+识别: 47_b.png -> 2_b
+识别: 51_b.png -> Q_b
+识别: 52_r.png -> T_r
+识别: 53_b.png -> 4_b
+识别: 54_r.png -> 6_r
+识别: 55_r.png -> 7_r
+识别: 56_r.png -> T_r
+识别: 61_r.png -> Q_r
+识别: 62_b.png -> 7_b
+识别: 63_r.png -> 5_r
+识别: 66_b.png -> A_b
+识别: 71_r.png -> 4_r
+识别: 72_r.png -> A_r
+识别: 73_b.png -> 8_b
+识别: 74_b.png -> 8_b
+识别: 75_b.png -> 6_b
+识别: 76_r.png -> 2_r
+识别: 81_b.png -> 6_b
+识别: 82_r.png -> K_r
+识别: 83_r.png -> 9_r
+识别: 84_b.png -> J_b
+识别: 85_r.png -> A_r
+识别: 86_r.png -> Q_r
 
 Freecell Layout:
 # MS Freecell Game Layout
 #
-: 4H QH 2H 9H TS 6H TC
-: 3S AS TH 5H KH 9S 8H
-: 7H 5S JH QD 9C 6S KS
-: AH 8D 4S KD QS 6D QC
-: JD 9D 2D 5D 7S 4D
-: 7C TD AC 2S KC 2C
-: AD JS 4C 6C 7D 3H
-: 8S JC 5C 8C 3D 3C
+: TS KH 9S    5S 4H 3S
+: KS JH 3C 8H AS 2S
+: 8D KC 7S 6H JS 9H 9C
+: 5C 3H QS 4S TC    2C
+: QC TH 4C 6D 7H TD
+: QH 7C 5H       AC
+: 4D AH 8S 8C 6S 2H
+: 6C KD 9D JC AD QD
 
-# 牌组完整且合法
+# 验证失败:
+# D花色数量错误: 8张
+# D花色缺少: 2,3,5,7,J
+# 总牌数错误: 47张
