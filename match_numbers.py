@@ -42,7 +42,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 
 class TemplateManager:
-    def __init__(self, template_dir: str = 'Card_Rank_Templates'):
+    def __init__(self, template_dir: str = 'Card_Rank_Templates/set_1'):  # 修改默认模板路径
         self.template_dir = template_dir
         self.templates: Dict[str, List[Tuple[np.ndarray, str]]] = {'_r': [], '_b': []}
         self.load_templates()
@@ -191,9 +191,13 @@ def validate_cards(columns):
     if len(all_cards) != 52:
         errors.append(f"总牌数错误: {len(all_cards)}张")
     return not bool(errors), errors
-
-def format_freecell_layout(results):
-    """将识别结果格式化为MS Freecell布局"""
+def format_freecell_layout(results, root=None):
+    """将识别结果格式化为MS Freecell布局
+    
+    Args:
+        results: 识别结果列表
+        root: 可选的Tkinter根窗口，用于剪贴板操作
+    """
     # 初始化8列，每列7个空位（最大可能的牌数）
     columns = [["  " for _ in range(7)] for _ in range(8)]
     red_first, black_first = {}, {}
@@ -234,13 +238,34 @@ def format_freecell_layout(results):
     output.append("")
     if is_valid:
         output.append("# 牌组完整且合法")
+        # 验证成功后自动复制到剪贴板
+        try:
+            layout_text = "\n".join(output)
+            
+            # 如果提供了root参数，使用它来操作剪贴板
+            if root:
+                root.clipboard_clear()
+                root.clipboard_append(layout_text)
+                root.update()  # 刷新剪贴板
+                print("布局已自动复制到剪贴板")
+            else:
+                # 兼容旧代码，创建临时Tkinter实例
+                import tkinter as tk
+                temp_root = tk.Tk()
+                temp_root.withdraw()  # 隐藏窗口
+                temp_root.clipboard_clear()
+                temp_root.clipboard_append(layout_text)
+                temp_root.update()  # 刷新剪贴板
+                temp_root.destroy()
+                print("布局已自动复制到剪贴板")
+        except Exception as e:
+            print(f"复制到剪贴板失败: {str(e)}")
     else:
         output.append("# 验证失败:")
         for error in errors:
             output.append(f"# {error}")
     
     return output
-
 def process_all_cards():
     """处理所有纸牌图像并生成布局"""
     start_time = time.time()

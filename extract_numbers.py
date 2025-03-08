@@ -150,5 +150,6 @@ def process_cards(padding=2):
         cv2.imwrite(output_path, number_img)
         print(f"处理完成: {output_path}")
 
-# 直接调用处理函数
-process_cards()
+# 只有在直接运行此脚本时才执行process_cards()
+if __name__ == "__main__":
+    process_cards()
