@@ -1,6 +1,5 @@
-temp/*
 __pycache__/*
-cards/*
-ocr-results/*
 Card_Rank_Images/*
 Single_Card_Images/*
+Card_Match_Result.log
+Card_Match_Result.log
