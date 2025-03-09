@@ -35,7 +35,7 @@ def extract_number(image_path, padding=2):
     # 读取图片
     img = cv2.imread(image_path)
     if img is None:
-        print(f"无法读取图片: {image_path}")
+        # print(f"无法读取图片: {image_path}")
         return None
     
     # 转换到HSV颜色空间，便于处理红黑两色
@@ -131,7 +131,6 @@ def process_cards(padding=2):
     # 获取cards目录中的所有png文件
     cards_dir = 'Single_Card_Images'
     if not os.path.exists(cards_dir):
-        print(f"Single_Card_Images目录不存在")
         return
         
     image_files = [f for f in os.listdir(cards_dir) if f.endswith('.png')]
@@ -148,8 +147,7 @@ def process_cards(padding=2):
         name, ext = os.path.splitext(filename)
         output_path = os.path.join(output_dir, f'{name}{color_type}{ext}')
         cv2.imwrite(output_path, number_img)
-        print(f"处理完成: {output_path}")
-
+        # 移除调试输出
 # 只有在直接运行此脚本时才执行process_cards()
 if __name__ == "__main__":
     process_cards()

@@ -100,3 +100,29 @@ class CardSplitter:
                 filename = f"{col_idx+1}{row_idx+1}.png"
                 cv2.imwrite(os.path.join(self.output_dir, filename), card, 
                           [cv2.IMWRITE_PNG_COMPRESSION, 0])
+
+# 添加主函数，使模块可以单独运行
+if __name__ == "__main__":
+    # 检查Freecell_Layout.png是否存在
+    layout_path = "Freecell_Layout.png"
+    if not os.path.exists(layout_path):
+        print(f"错误: 未找到{layout_path}文件")
+        exit(1)
+    
+    try:
+        # 读取图像
+        image = cv2.imread(layout_path)
+        if image is None:
+            print(f"错误: 无法读取图像{layout_path}")
+            exit(1)
+            
+        print(f"正在处理图像: {layout_path}")
+        
+        # 创建分割器并处理图像
+        splitter = CardSplitter()
+        splitter.split_cards(image)
+        
+        print(f"处理完成! 分割后的卡片已保存到{splitter.output_dir}目录")
+    except Exception as e:
+        print(f"处理过程中出错: {str(e)}")
+        exit(1)

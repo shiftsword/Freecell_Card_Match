@@ -127,12 +127,17 @@ class RankMatcher:
 
         return best_rank, best_score * 100, match_count  # 转换为百分比
 
-def match_card_rank(image_path: str) -> Tuple[Optional[str], float, int, int]:
-    """主函数：识别单张纸牌图像的点数，返回点数、匹配度、匹配次数和处理时间"""
+def match_card_rank(image_path: str, template_dir: str = 'Card_Rank_Templates/set_1') -> Tuple[Optional[str], float, int, int]:
+    """主函数：识别单张纸牌图像的点数，返回点数、匹配度、匹配次数和处理时间
+    
+    Args:
+        image_path: 图像路径
+        template_dir: 模板目录路径，默认为'Card_Rank_Templates/set_1'
+    """
     start_time = time.time()
     try:
-        # 初始化
-        template_manager = TemplateManager()
+        # 初始化，使用传入的模板目录
+        template_manager = TemplateManager(template_dir)
         matcher = RankMatcher(template_manager)
 
         # 读取图像
@@ -145,8 +150,6 @@ def match_card_rank(image_path: str) -> Tuple[Optional[str], float, int, int]:
 
         # 执行匹配
         result, confidence, match_count = matcher.match_rank(image, color)
-        if result is None:
-            print(f"警告: 无法识别点数 - {image_path}")
             
         process_time = int((time.time() - start_time) * 1000)
         return result, confidence, match_count, process_time
@@ -159,20 +162,23 @@ def match_card_rank(image_path: str) -> Tuple[Optional[str], float, int, int]:
 def create_log_line(filename, number, color, confidence, match_count, process_time, error_msg=""):
     """创建日志行"""
     if number:
-        return f"识别成功: {filename} , {number}{color} , [模板匹配] , [匹配度:{confidence:.1f}%] , [匹配次数:{match_count}] , [{process_time}ms]\n"
+        return f"识别成功: {filename} , {number}{color} , [{confidence:.1f}%] , [{process_time}ms]\n"
     else:
-        return f"识别失败: {filename} , FAIL , [模板匹配] , [匹配度:0.0%] , [匹配次数:{match_count}] , [{process_time}ms] - {error_msg}\n"
-
+        return f"识别失败: {filename} , FAIL , [0.0%] , [{process_time}ms] - {error_msg}\n"
 def validate_cards(columns):
     """验证牌组是否完整合法"""
     suits = {'H': [], 'S': [], 'D': [], 'C': []}
     all_cards = []
     for col in columns:
         for card in col:
-            if len(card) >= 2:  # 确保卡片格式正确
+            if len(card) >= 2 and card.strip() != "":  # 确保卡片格式正确且不是空白
                 number, suit = card[0], card[1]
-                suits[suit].append(number)
-                all_cards.append(card)
+                # 检查花色是否有效
+                if suit in suits:
+                    suits[suit].append(number)
+                    all_cards.append(card)
+                # 如果遇到无效花色，跳过该卡片
+    
     errors = []
     valid_numbers = set('A23456789TJQK')
     # 检查每种花色
@@ -225,49 +231,50 @@ def format_freecell_layout(results, root=None):
                 columns[col][row] = f"{number}{suit}"
     
     # 格式化输出
-    output = ["# MS Freecell Game Layout", "#"]
-    for col in columns:
-        # 移除末尾的空位，但保留中间的未识别位置
-        while col and col[-1] == "  ":
-            col.pop()
-        output.append(": " + " ".join(col))
+    layout_lines = []
+    layout_lines.append("# MS Freecell Game Layout")
+    layout_lines.append("#")
     
-    # 验证结果
-    valid_cards = [card for col in columns for card in col if card != "  "]
-    is_valid, errors = validate_cards([valid_cards])
-    output.append("")
+    # 添加8行纸牌布局，去除每行末尾的空格
+    for i in range(8):
+        cards_in_column = [card for card in columns[i] if card.strip()]  # 只保留非空卡片
+        line = ": " + " ".join(cards_in_column)
+        layout_lines.append(line)
+    
+    # 验证牌组是否完整合法
+    is_valid, errors = validate_cards(columns)
+    
+    # 添加验证结果到GUI显示，但不添加到剪贴板内容
     if is_valid:
-        output.append("# 牌组完整且合法")
-        # 验证成功后自动复制到剪贴板
-        try:
-            layout_text = "\n".join(output)
-            
-            # 如果提供了root参数，使用它来操作剪贴板
-            if root:
-                root.clipboard_clear()
-                root.clipboard_append(layout_text)
-                root.update()  # 刷新剪贴板
-                print("布局已自动复制到剪贴板")
-            else:
-                # 兼容旧代码，创建临时Tkinter实例
-                import tkinter as tk
-                temp_root = tk.Tk()
-                temp_root.withdraw()  # 隐藏窗口
-                temp_root.clipboard_clear()
-                temp_root.clipboard_append(layout_text)
-                temp_root.update()  # 刷新剪贴板
-                temp_root.destroy()
-                print("布局已自动复制到剪贴板")
-        except Exception as e:
-            print(f"复制到剪贴板失败: {str(e)}")
+        layout_lines.append("")
+        layout_lines.append("# 牌组完整且合法")
     else:
-        output.append("# 验证失败:")
+        layout_lines.append("")
+        layout_lines.append("# 牌组不完整或不合法")
         for error in errors:
-            output.append(f"# {error}")
+            layout_lines.append(f"# {error}")
     
-    return output
-def process_all_cards():
-    """处理所有纸牌图像并生成布局"""
+    # 复制到剪贴板的内容不包含验证结果
+    clipboard_lines = layout_lines[:-2] if is_valid else layout_lines[:-2-len(errors)]
+    
+    # 如果提供了root，则复制到剪贴板
+    if root:
+        try:
+            clipboard_text = "\n".join(clipboard_lines)
+            root.clipboard_clear()
+            root.clipboard_append(clipboard_text)
+            root.update()
+            print("\n布局已自动复制到剪贴板")
+        except Exception as e:
+            print(f"\n复制到剪贴板失败: {str(e)}")
+    
+    return layout_lines  # 返回完整的布局行（包括验证结果）
+def process_all_cards(template_dir: str = 'Card_Rank_Templates/set_1'):
+    """处理所有纸牌图像并生成布局
+    
+    Args:
+        template_dir: 模板目录路径，默认为'Card_Rank_Templates/set_1'
+    """
     start_time = time.time()
     input_dir = 'Card_Rank_Images'
     if not os.path.exists(input_dir):
@@ -277,15 +284,17 @@ def process_all_cards():
     # 初始化
     image_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
     results = []
+    success_count = 0  # 添加成功识别计数器
     
     # 清空日志文件
     with open('Card_Match_Result.log', 'w', encoding='utf-8') as f:
-        f.write("识别结果,文件名,点数,匹配度,匹配次数,用时,方法\n")
+        f.write("识别结果,文件名,点数,匹配度,用时\n")
     
     # 处理每张图片
     for filename in image_files:
         image_path = os.path.join(input_dir, filename)
-        number, confidence, match_count, process_time = match_card_rank(image_path)
+        # 传入模板目录
+        number, confidence, match_count, process_time = match_card_rank(image_path, template_dir)
         color = 'r' if '_r.' in filename else 'b'
         
         # 记录结果
@@ -297,6 +306,7 @@ def process_all_cards():
         
         if number:
             results.append({'number': number, 'color': color, 'filename': filename})
+            success_count += 1  # 只有成功识别时才增加计数
     
     # 生成布局
     if results:
@@ -311,9 +321,9 @@ def process_all_cards():
             for line in layout:
                 f.write(line + "\n")
     
-    # 输出统计
+    # 输出统计 - 修改为只统计成功识别的卡片
     total_time = int((time.time() - start_time) * 1000)
-    print(f"\n共识别 {len(results)} 张卡牌，总用时 {total_time}ms")
+    print(f"\n共识别成功 {success_count} 张卡牌，总用时 {total_time}ms")
     return results
 
 if __name__ == '__main__':

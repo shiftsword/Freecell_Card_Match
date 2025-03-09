@@ -41,6 +41,35 @@ class FreecellOCRApp:
     def create_template(self):
         """打开模板创建工具"""
         try:
+            # 检查是否已选择图片
+            image_path = self.image_path.get()
+            if not image_path or not os.path.exists(image_path):
+                messagebox.showinfo("提示", "请先选择有效的图像文件")
+                return
+                
+            # 保存当前图像为Freecell_Layout.png
+            self.save_current_image_as_layout()
+                
+            # 自动执行卡片分割和数字提取
+            self.result_text.delete(1.0, tk.END)
+            self.result_text.insert(tk.END, "正在准备模板创建...\n")
+            
+            # 步骤1: 分割纸牌
+            self.update_status("准备模板: 分割纸牌...")
+            # 使用numpy读取图像以支持中文路径
+            image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if image is None:
+                raise Exception("无法读取图像")
+            
+            splitter = CardSplitter()
+            splitter.split_cards(image)
+            self.update_result("✓ 纸牌分割完成，已保存到Single_Card_Images目录\n")
+            
+            # 步骤2: 提取数字
+            self.update_status("准备模板: 提取数字...")
+            extract_numbers.process_cards()
+            self.update_result("✓ 数字提取完成，已保存到Card_Rank_Images目录\n")
+            
             # 导入模板创建模块
             import create_templates
             import importlib
@@ -57,9 +86,12 @@ class FreecellOCRApp:
             # 等待窗口关闭后重新加载模板集
             self.root.wait_window(template_window)
             self.load_template_sets()
+            
+            self.update_status("就绪")
                 
         except Exception as e:
             messagebox.showerror("错误", f"启动模板创建工具失败: {str(e)}")
+            self.update_status(f"处理失败: {str(e)}")
     def check_directories(self):
         """检查并创建必要的目录"""
         # 清空并重建目录
@@ -74,7 +106,7 @@ class FreecellOCRApp:
         template_dir = 'Card_Rank_Templates'
         if not os.path.exists(template_dir):
             os.makedirs(template_dir, exist_ok=True)
-            self.template_set.set("set_1")  # 默认设置为set_1
+            self.template_set.set("自动")  # 默认设置为自动
             return
             
         # 获取所有模板集并删除空目录
@@ -88,15 +120,61 @@ class FreecellOCRApp:
                     os.rmdir(dir_path)
                     continue
                 template_sets.append(d)
+            
+        # 添加"自动"选项
+        template_sets.insert(0, "自动")
         
-        if not template_sets:
-            self.template_set.set("set_1")  # 默认设置为set_1
+        if not template_sets or len(template_sets) == 1:
+            self.template_set.set("自动")  # 默认设置为自动
         else:
-            # 默认选择最新的模板集
-            template_sets.sort()
-            self.template_set.set(template_sets[-1])
+            # 默认选择自动
+            self.template_set.set("自动")
             # 更新下拉菜单
             self.template_combo['values'] = template_sets
+            
+    def check_card_size_and_select_template(self):
+        """根据单张纸牌尺寸选择合适的模板集"""
+        card_dir = "Single_Card_Images"
+        if not os.path.exists(card_dir) or not os.listdir(card_dir):
+            return "set_1"  # 默认模板集
+        
+        # 获取第一张卡片的尺寸
+        card_files = [f for f in os.listdir(card_dir) if f.endswith('.png')]
+        if not card_files:
+            return "set_1"
+            
+        first_card = os.path.join(card_dir, card_files[0])
+        img = cv2.imread(first_card)
+        if img is None:
+            return "set_1"
+        
+        height, width = img.shape[:2]
+        self.update_result(f"检测到单张纸牌尺寸: {width}x{height}\n")
+        
+        # 根据单张纸牌尺寸选择模板集
+        if width >= 200 or height >= 80:  # 高分辨率卡片 (约2880x1440分辨率)
+            template_set = "set_2880x1800"
+        else:  # 标准分辨率卡片 (约1920x1080分辨率)
+            template_set = "set_1920x1080"
+        
+        # 检查选择的模板集是否存在，如果不存在则使用可用的模板集
+        template_dir = os.path.join('Card_Rank_Templates', template_set)
+        if not os.path.exists(template_dir) or not os.listdir(template_dir):
+            # 查找可用的模板集
+            available_sets = []
+            for d in os.listdir('Card_Rank_Templates'):
+                dir_path = os.path.join('Card_Rank_Templates', d)
+                if d.startswith('set_') and os.path.isdir(dir_path) and os.listdir(dir_path):
+                    available_sets.append(d)
+            
+            if available_sets:
+                template_set = available_sets[0]  # 使用第一个可用的模板集
+            else:
+                template_set = "set_1"  # 如果没有可用的模板集，使用默认值
+        
+        self.update_result(f"自动选择模板集: {template_set}\n")
+        return template_set
+
     def create_widgets(self):
         """创建界面组件"""
         # 创建主框架
@@ -209,12 +287,6 @@ class FreecellOCRApp:
         try:
             # 获取选择的模板集
             template_set = self.template_set.get()
-            if template_set == "无可用模板":
-                raise Exception("请先创建模板集")
-            
-            template_dir = os.path.join('Card_Rank_Templates', template_set)
-            if not os.path.exists(template_dir):
-                raise Exception(f"模板目录不存在: {template_dir}")
             
             # 创建日志文件，但暂不写入内容
             log_file = None
@@ -247,6 +319,14 @@ class FreecellOCRApp:
                 splitter.split_cards(image)
                 self.update_result("✓ 纸牌分割完成，已保存到Single_Card_Images目录\n")
                 
+                # 如果选择了"自动"，根据单张纸牌尺寸自动选择模板集
+                if template_set == "自动":
+                    template_set = self.check_card_size_and_select_template()
+                
+                template_dir = os.path.join('Card_Rank_Templates', template_set)
+                if not os.path.exists(template_dir):
+                    raise Exception(f"模板目录不存在: {template_dir}")
+                
                 # 步骤2: 提取数字
                 self.update_status("步骤2/3: 提取数字...")
                 extract_numbers.process_cards()
@@ -257,39 +337,51 @@ class FreecellOCRApp:
                 
                 # 在识别开始前创建日志文件
                 log_file = open("Card_Match_Result.log", "w", encoding="utf-8")
+                log_file.write("识别结果,文件名,点数,匹配度,匹配次数,用时,方法\n")
                 
+                # 在run_processing方法中，修改调用match_card_rank的部分
                 # 使用选定的模板集进行识别
                 template_manager = match_numbers.TemplateManager(template_dir)
                 matcher = match_numbers.RankMatcher(template_manager)
                 
                 # 处理所有卡片
                 results = []
+                start_time = time.time()
                 input_dir = 'Card_Rank_Images'
                 image_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
+                
                 for filename in image_files:
                     image_path = os.path.join(input_dir, filename)
-                    color = '_r' if '_r.' in filename else '_b'
-                    # 读取图像
-                    image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-                    if image is None:
-                        continue
-                    # 执行匹配
-                    rank, confidence, _ = matcher.match_rank(image, color)
-                    if rank:
+                    
+                    # 使用match_card_rank函数进行识别，传入模板目录
+                    number, confidence, match_count, process_time = match_numbers.match_card_rank(image_path, template_dir)
+                    color_simple = 'r' if '_r.' in filename else 'b'
+                    
+                    # 记录结果
+                    error_msg = "识别失败" if number is None else ""
+                    log_line = match_numbers.create_log_line(filename, number, color_simple, confidence, match_count, process_time, error_msg)
+                    log_file.write(log_line)
+                    self.update_result(log_line.strip() + "\n")
+                    
+                    # 即使识别失败也添加到结果中，使用默认值
+                    if number:
                         results.append({
-                            'number': rank, 
-                            'color': color.replace('_', ''), 
+                            'number': number, 
+                            'color': color_simple, 
                             'filename': filename
                         })
-                        # 显示在GUI中
-                        self.update_result(f"识别: {filename} -> {rank}{color}\n")
-                        # 写入日志文件
-                        log_file.write(f"识别: {filename} -> {rank}{color}\n")
-                # 格式化输出 - 注意这里的缩进修正，应该在所有卡片处理完成后执行
+                    else:
+                        # 添加一个占位符结果，以便在布局中显示未识别的卡片
+                        results.append({
+                            'number': '?', 
+                            'color': color_simple, 
+                            'filename': filename
+                        })
+                
+                # 格式化输出
                 if results:
                     # 使用match_numbers.format_freecell_layout生成布局
-                    # 传递self.root作为参数，以便使用主应用程序的Tkinter实例操作剪贴板
-                    layout = match_numbers.format_freecell_layout(results, self.root)
+                    layout = match_numbers.format_freecell_layout(results, None)  # 先不传入root，避免自动复制到剪贴板
                     
                     # 显示在GUI中
                     self.update_result("\nFreecell Layout:\n")
@@ -297,19 +389,39 @@ class FreecellOCRApp:
                         self.update_result(line + "\n")
                     
                     # 写入日志文件
-                    log_file.write("\nFreecell Layout:\n")
+                    log_file.write("\n")
                     for line in layout:
                         log_file.write(line + "\n")
+                    
+                    # 检查是否所有卡片都识别成功且通过完整性验证
+                    all_recognized = all(result['number'] != '?' for result in results)
+                    # 检查布局中是否包含验证成功的信息
+                    validation_passed = any("牌组完整且合法" in line for line in layout)
+                    
+                    # 仅当所有卡片识别成功且通过完整性验证时才复制到剪贴板
+                    if all_recognized and validation_passed:
+                        # 提取不包含验证信息的布局行
+                        clipboard_lines = []
+                        for line in layout:
+                            if not line.startswith("# 牌组"):
+                                clipboard_lines.append(line)
                         
-                # 不再需要重复复制到剪贴板，因为format_freecell_layout已经做了
-                # 移除以下代码:
-                # self.root.clipboard_clear()
-                # self.root.clipboard_append(layout_text)
-                # self.root.update()
-                # 不再需要重复输出复制成功信息，因为format_freecell_layout已经输出了
-                # 移除以下代码:
-                # self.update_result("\n布局已自动复制到剪贴板\n")
-                # log_file.write("\n布局已自动复制到剪贴板\n")
+                        # 复制到剪贴板
+                        clipboard_text = "\n".join(clipboard_lines)
+                        self.root.clipboard_clear()
+                        self.root.clipboard_append(clipboard_text)
+                        self.root.update()
+                        self.update_result("\n布局已自动复制到剪贴板\n")
+                        log_file.write("\n布局已自动复制到剪贴板\n")
+                    # 移除未复制到剪贴板时的提示和记录
+                
+                # 在run_processing方法中，修改统计部分
+                # 输出统计
+                success_count = sum(1 for result in results if result['number'] != '?')
+                total_time = int((time.time() - start_time) * 1000)
+                summary = f"\n共识别成功 {success_count} 张卡牌，总用时 {total_time}ms"
+                self.update_result(summary)
+                log_file.write(summary + "\n")
                     
             finally:
                 sys.stdout = original_stdout
@@ -337,6 +449,33 @@ class FreecellOCRApp:
         self.processing = False
         self.process_btn.config(state=tk.NORMAL)
         
+    def clear_image_directories(self):
+        """清空图像处理目录"""
+        dirs = ["Single_Card_Images", "Card_Rank_Images"]
+        for dir_name in dirs:
+            if os.path.exists(dir_name):
+                for file in os.listdir(dir_name):
+                    try:
+                        os.remove(os.path.join(dir_name, file))
+                    except Exception as e:
+                        print(f"清除文件失败: {file}, 错误: {str(e)}")
+            else:
+                os.makedirs(dir_name, exist_ok=True)
+                
+    def save_current_image_as_layout(self):
+        """将当前载入的图像保存为Freecell_Layout.png"""
+        try:
+            image_path = self.image_path.get()
+            if image_path and os.path.exists(image_path):
+                # 读取原始图像
+                image = Image.open(image_path)
+                # 保存为Freecell_Layout.png，覆盖已有文件
+                layout_path = "Freecell_Layout.png"
+                image.save(layout_path)
+                self.update_result(f"已保存当前图像为 {layout_path}\n")
+        except Exception as e:
+            self.update_result(f"保存图像失败: {str(e)}\n")
+    
     def process_image(self):
         """处理图像的主函数"""
         if self.processing:
@@ -347,6 +486,13 @@ class FreecellOCRApp:
         if not image_path or not os.path.exists(image_path):
             messagebox.showinfo("提示", "请先选择有效的图像文件")
             return
+            
+        # 保存当前图像为Freecell_Layout.png
+        self.save_current_image_as_layout()
+            
+        # 开始处理前先清空目录
+        self.clear_image_directories()
+        
         # 开始处理
         self.processing = True
         self.process_btn.config(state=tk.DISABLED)
@@ -380,13 +526,13 @@ class FreecellOCRApp:
                 messagebox.showerror("错误", "剪贴板中没有图像")
                 return
             
-            # 保存为临时文件
-            temp_path = "clipboard.png"
-            image.save(temp_path)
+            # 直接保存为Freecell_Layout.png
+            layout_path = "Freecell_Layout.png"
+            image.save(layout_path)
             
             # 设置路径并预览
-            self.image_path.set(os.path.abspath(temp_path))
-            self.load_preview(temp_path)
+            self.image_path.set(os.path.abspath(layout_path))
+            self.load_preview(layout_path)
             self.status_var.set("已从剪贴板读取图像")
             
         except Exception as e:
@@ -417,3 +563,4 @@ def main():
     root.mainloop()
 if __name__ == "__main__":
         main()
+    
