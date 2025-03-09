@@ -6,6 +6,7 @@ import numpy as np
 import threading
 import time
 from PIL import Image, ImageTk, ImageGrab
+import re
 
 # 导入项目模块
 from card_splitter import CardSplitter
@@ -249,14 +250,27 @@ class FreecellOCRApp:
         result_frame = ttk.LabelFrame(right_frame, text="识别结果")
         result_frame.pack(fill=tk.BOTH, expand=True)
         
-        # 创建文本框用于显示结果
-        self.result_text = tk.Text(result_frame, wrap=tk.WORD, height=10)
-        self.result_text.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # 创建文本框和滚动条的容器
+        text_container = ttk.Frame(result_frame)
+        text_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         
-        # 添加滚动条
-        scrollbar = ttk.Scrollbar(result_frame, command=self.result_text.yview)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.result_text.config(yscrollcommand=scrollbar.set)
+        # 创建水平滚动条
+        h_scrollbar = ttk.Scrollbar(text_container, orient=tk.HORIZONTAL)
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        
+        # 创建垂直滚动条
+        v_scrollbar = ttk.Scrollbar(text_container)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # 创建文本框用于显示结果，禁用自动换行
+        self.result_text = tk.Text(text_container, wrap=tk.NONE, height=10, 
+                                  yscrollcommand=v_scrollbar.set,
+                                  xscrollcommand=h_scrollbar.set)
+        self.result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # 配置滚动条与文本框的关联
+        v_scrollbar.config(command=self.result_text.yview)
+        h_scrollbar.config(command=self.result_text.xview)
     def load_preview(self, image_path):
         """加载并显示图像预览"""
         try:
@@ -538,6 +552,7 @@ class FreecellOCRApp:
         except Exception as e:
             messagebox.showerror("错误", f"读取剪贴板失败: {str(e)}")
             self.status_var.set("读取剪贴板失败")
+            
     def view_image(self):
         """查看当前图像"""
         image_path = self.image_path.get()
@@ -545,22 +560,335 @@ class FreecellOCRApp:
             messagebox.showinfo("提示", "请先选择有效的图像文件")
             return
         
-        # 使用系统默认程序打开图像
-        try:
-            os.startfile(image_path)  # Windows
-        except:
-            try:
-                import subprocess
-                subprocess.call(["xdg-open", image_path])  # Linux
-            except:
+        # 创建查看器窗口
+        viewer = CardViewerWindow(self.root, image_path)
+
+# 添加新的卡片查看器窗口类
+class CardViewerWindow:
+    def __init__(self, parent, image_path):
+        self.parent = parent
+        self.image_path = image_path
+        
+        # 创建新窗口
+        self.window = tk.Toplevel(parent)
+        self.window.title("纸牌查看器")
+        self.window.geometry("1024x832")  # 设置窗口大小为1024x832
+        self.window.resizable(True, True)  # 允许调整大小
+        
+        # 添加标记，用于跟踪是否有修改
+        self.modified = False
+        self.card_values = {}  # 存储卡片值，用于跟踪修改
+        
+        # 创建界面
+        self.create_widgets()
+        
+        # 加载图像
+        self.load_image()
+        
+        # 加载卡片
+        self.load_cards()
+        
+        # 绑定窗口关闭事件
+        self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+    def create_widgets(self):
+        """创建界面组件"""
+        # 主框架
+        main_frame = ttk.Frame(self.window, padding="10")
+        main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 上方图像区域 (高度为400，宽度自适应)
+        self.image_frame = ttk.Frame(main_frame, height=400)
+        self.image_frame.pack(fill=tk.X, pady=(0, 10))
+        self.image_frame.pack_propagate(False)  # 防止子组件改变frame大小
+        
+        # 创建内部框架用于居中显示图像
+        self.image_center_frame = ttk.Frame(self.image_frame)
+        self.image_center_frame.pack(expand=True)
+        
+        self.image_label = ttk.Label(self.image_center_frame)
+        self.image_label.pack()
+        
+        # 下方卡片区域 (8列7行，占满剩余空间)
+        self.cards_frame = ttk.Frame(main_frame)
+        self.cards_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # 创建8x7网格
+        self.card_labels = []
+        for row in range(7):
+            row_labels = []
+            for col in range(8):
+                # 跳过最后一行的后4个格子（第7行的第5-8列）
+                if row == 6 and col >= 4:
+                    row_labels.append(None)  # 添加None作为占位符
+                    continue
+                    
+                frame = ttk.Frame(self.cards_frame, borderwidth=1, relief="solid")
+                frame.grid(row=row, column=col, padx=2, pady=2, sticky="nsew")
+                
+                # 创建标签显示卡片
+                card_label = ttk.Label(frame)
+                card_label.pack(side=tk.LEFT, padx=2)
+                
+                # 创建文本框显示卡片标识，可直接编辑
+                id_var = tk.StringVar(value=f"{col+1}{chr(65+row)}")
+                id_entry = ttk.Entry(frame, textvariable=id_var, width=4, justify='center')
+                id_entry.pack(side=tk.RIGHT, padx=2)
+                
+                # 绑定文本变化事件
+                id_var.trace_add("write", lambda name, index, mode, r=row, c=col, v=id_var: self.on_text_changed(r, c, v))
+                
+                row_labels.append((card_label, id_entry, frame, id_var))
+            self.card_labels.append(row_labels)
+        
+        # 设置列和行的权重，使其均匀分布
+        for i in range(8):
+            self.cards_frame.columnconfigure(i, weight=1)
+        for i in range(7):
+            self.cards_frame.rowconfigure(i, weight=1)
+    
+    def on_text_changed(self, row, col, var):
+        """文本框内容变化时的回调函数"""
+        position_key = f"{row},{col}"
+        if position_key in self.card_values:
+            new_value = var.get().strip()
+            if new_value != self.card_values[position_key]['value']:
+                self.card_values[position_key]['value'] = new_value
+                self.modified = True
+    
+    def load_cards(self):
+        """加载并显示卡片图像"""
+        card_dir = "Card_Rank_Images"
+        if not os.path.exists(card_dir):
+            messagebox.showinfo("提示", "Card_Rank_Images目录不存在")
+            return
+        
+        # 清空所有卡片标签
+        for row in self.card_labels:
+            for cell in row:
+                if cell:  # 检查是否为None
+                    card_label, id_entry, frame, _ = cell
+                    card_label.configure(image='')
+                    card_label.image = None
+        
+        # 创建自定义样式
+        style = ttk.Style()
+        style.configure('red.TFrame', background='#ffcccc')  # 更鲜艳的红色背景
+        style.configure('black.TFrame', background='#ccccff')  # 更鲜艳的蓝色背景
+        
+        # 加载卡片图像
+        for filename in os.listdir(card_dir):
+            if filename.endswith('.png'):
                 try:
-                    subprocess.call(["open", image_path])  # macOS
-                except:
-                    messagebox.showerror("错误", "无法打开图像文件")
+                    # 从文件名中提取位置信息 (例如: 34_r.png -> 列3, 行4)
+                    match = re.match(r'(\d+)_([rb])\.png', filename)
+                    if match:
+                        col_row = match.group(1)
+                        if len(col_row) == 2:
+                            col = int(col_row[0]) - 1  # 列号从0开始
+                            row = int(col_row[1]) - 1  # 行号从0开始
+                            color_type = match.group(2)  # 获取颜色类型 (r或b)
+                            
+                            # 检查位置是否有效且不是被跳过的格子
+                            if 0 <= col < 8 and 0 <= row < 7 and not (row == 6 and col >= 4):
+                                # 加载图像
+                                image_path = os.path.join(card_dir, filename)
+                                image = Image.open(image_path)
+                                
+                                # 调整图像大小
+                                image = image.resize((40, 40), Image.Resampling.LANCZOS)
+                                
+                                # 转换为PhotoImage对象
+                                photo = ImageTk.PhotoImage(image)
+                                
+                                # 获取点数识别结果
+                                card_value = self.get_card_value(filename)
+                                
+                                # 存储卡片值和文件名，用于跟踪修改
+                                position_key = f"{row},{col}"
+                                self.card_values[position_key] = {
+                                    'value': card_value,
+                                    'filename': filename,
+                                    'color_type': color_type,
+                                    'original_value': card_value  # 保存原始值用于比较
+                                }
+                                
+                                # 更新卡片标签
+                                cell = self.card_labels[row][col]
+                                if cell:  # 检查是否为None
+                                    card_label, id_entry, frame, id_var = cell
+                                    card_label.configure(image=photo)
+                                    card_label.image = photo  # 保持引用以防止垃圾回收
+                                    
+                                    # 更新文本框显示为点数识别结果
+                                    id_var.set(card_value)
+                                    
+                                    # 设置背景颜色
+                                    color = 'red' if color_type == 'r' else 'black'
+                                    frame.configure(style=f'{color}.TFrame')
+                except Exception as e:
+                    print(f"加载卡片失败: {filename}, 错误: {str(e)}")
+    
+    def on_closing(self):
+        """窗口关闭时的处理"""
+        if self.modified:
+            response = messagebox.askyesnocancel("保存修改", "识别结果已被修改，是否保存更改？")
+            if response is None:  # 取消关闭
+                return
+            if response:  # 确认保存
+                self.save_modified_results()
+        
+        self.window.destroy()
+    
+    def save_modified_results(self):
+        """保存修改后的结果"""
+        try:
+            # 准备修改后的结果
+            results = []
+            for position_key, card_info in self.card_values.items():
+                row, col = map(int, position_key.split(','))
+                # 获取用户输入的值
+                card_value = card_info['value'].strip()
+                
+                # 确保卡片值格式正确（例如：Ah, 2c, 10d 等）
+                # 标准化卡片值格式
+                if len(card_value) >= 1:
+                    # 提取数字/字母部分和花色部分
+                    if len(card_value) == 1:
+                        # 如果只有一个字符，假设它是数字/字母部分，使用原始颜色
+                        rank = card_value.upper()
+                        suit = 'H' if card_info['color_type'] == 'r' else 'S'  # 默认红桃或黑桃
+                    else:
+                        # 否则，假设最后一个字符是花色
+                        rank = card_value[:-1].upper()
+                        suit = card_value[-1].upper()  # 确保花色是大写
+                    
+                    # 标准化花色（确保是H, D, C, S中的一个）
+                    if suit not in ['H', 'D', 'C', 'S']:
+                        if card_info['color_type'] == 'r':
+                            suit = 'H'  # 默认红桃
+                        else:
+                            suit = 'S'  # 默认黑桃
+                    
+                    # 重新组合卡片值
+                    card_value = rank + suit
+                
+                results.append({
+                    'number': card_value,
+                    'color': card_info['color_type'],
+                    'filename': card_info['filename'],
+                    'position': (row, col)  # 添加位置信息用于排序
+                })
+            
+            # 按照位置排序结果，确保卡片顺序正确
+            # 先按行排序，再按列排序
+            results.sort(key=lambda x: (x['position'][0], x['position'][1]))
+            
+            # 移除临时的位置信息
+            for result in results:
+                result.pop('position', None)
+            
+            # 使用match_numbers模块格式化输出
+            layout = match_numbers.format_freecell_layout(results, None)
+            
+            # 写入日志文件
+            with open("Card_Match_Result.log", "a", encoding="utf-8") as log_file:
+                log_file.write("\n\n# 手动修改后的结果\n")
+                for line in layout:
+                    log_file.write(line + "\n")
+            
+            # 检查是否所有卡片都识别成功且通过完整性验证
+            all_recognized = all(result['number'] != '?' for result in results)
+            validation_passed = any("牌组完整且合法" in line for line in layout)
+            
+            # 在主界面的结果文本框中显示修改后的布局
+            app = self.window.master
+            if hasattr(app, 'result_text'):
+                app.result_text.insert(tk.END, "\n\n# 手动修改后的结果\n")
+                for line in layout:
+                    app.result_text.insert(tk.END, line + "\n")
+                app.result_text.see(tk.END)  # 自动滚动到最新内容
+            
+            # 仅当所有卡片识别成功且通过完整性验证时才复制到剪贴板
+            if all_recognized and validation_passed:
+                # 提取不包含验证信息的布局行
+                clipboard_lines = []
+                for line in layout:
+                    if not line.startswith("# 牌组"):
+                        clipboard_lines.append(line)
+                
+                # 复制到剪贴板
+                clipboard_text = "\n".join(clipboard_lines)
+                self.window.clipboard_clear()
+                self.window.clipboard_append(clipboard_text)
+                self.window.update()
+                messagebox.showinfo("保存成功", "修改后的布局已保存并复制到剪贴板")
+            else:
+                messagebox.showinfo("保存成功", "修改后的布局已保存，但未通过完整性验证，未复制到剪贴板")
+                
+        except Exception as e:
+            messagebox.showerror("保存失败", f"保存修改后的结果失败: {str(e)}")
+
+    def load_image(self):
+            """加载并显示原始图像"""
+            try:
+                # 读取图像
+                image = Image.open(self.image_path)
+                
+                # 计算缩放比例以适应预览区域（保持原比例，高度为400）
+                max_height = 400
+                ratio = max_height / image.height
+                new_width = int(image.width * ratio)
+                new_height = max_height
+                
+                # 调整图像大小
+                image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # 转换为PhotoImage对象
+                photo = ImageTk.PhotoImage(image)
+                
+                # 更新图像标签
+                self.image_label.configure(image=photo)
+                self.image_label.image = photo  # 保持引用以防止垃圾回收
+                
+            except Exception as e:
+                messagebox.showerror("错误", f"加载图像失败: {str(e)}")
+    
+    def get_card_value(self, filename):
+        """从日志文件中获取卡片的识别结果"""
+        try:
+            log_path = "Card_Match_Result.log"
+            if os.path.exists(log_path):
+                with open(log_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if filename in line:
+                            # 提取识别结果 (格式: "识别成功: 86_b.png , Ab , [93.5%] , [9ms]")
+                            parts = line.split(',')
+                            if len(parts) > 1:
+                                # 从第二部分提取实际的识别结果
+                                result = parts[1].strip()
+                                return result  # 返回识别结果 (如 "Ab")
+        
+            # 如果没有找到识别结果，从文件名中提取位置作为默认值
+            match = re.match(r'(\d+)_([rb])\.png', filename)
+            if match:
+                col_row = match.group(1)
+                if len(col_row) == 2:
+                    col = col_row[0]
+                    row = col_row[1]
+                    return f"{col}{row}"
+                
+            return "?"  # 默认值
+        except Exception as e:
+            print(f"获取卡片值失败: {filename}, 错误: {str(e)}")
+            return "?"
+
 def main():
+    """程序入口函数"""
     root = tk.Tk()
     app = FreecellOCRApp(root)
     root.mainloop()
+
 if __name__ == "__main__":
-        main()
+    main()
     
