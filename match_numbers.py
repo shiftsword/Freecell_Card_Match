@@ -42,7 +42,7 @@ import time
 from typing import Dict, List, Tuple, Optional
 
 class TemplateManager:
-    def __init__(self, template_dir: str = 'Card_Rank_Templates/set_1'):  # 修改默认模板路径
+    def __init__(self, template_dir: str = 'Card_Rank_Templates/set_1920*1080'):  # 修改默认模板路径
         self.template_dir = template_dir
         self.templates: Dict[str, List[Tuple[np.ndarray, str]]] = {'_r': [], '_b': []}
         self.load_templates()
@@ -165,6 +165,7 @@ def create_log_line(filename, number, color, confidence, match_count, process_ti
         return f"识别成功: {filename} , {number}{color} , [{confidence:.1f}%] , [{process_time}ms]\n"
     else:
         return f"识别失败: {filename} , FAIL , [0.0%] , [{process_time}ms] - {error_msg}\n"
+
 def validate_cards(columns):
     """验证牌组是否完整合法"""
     suits = {'H': [], 'S': [], 'D': [], 'C': []}
@@ -197,12 +198,17 @@ def validate_cards(columns):
     if len(all_cards) != 52:
         errors.append(f"总牌数错误: {len(all_cards)}张")
     return not bool(errors), errors
-def format_freecell_layout(results, root=None):
-    """将识别结果格式化为MS Freecell布局
+
+# 新增函数：将结果列表转换为列布局
+def results_to_columns(results):
+    """将识别结果列表转换为列布局
     
     Args:
         results: 识别结果列表
-        root: 可选的Tkinter根窗口，用于剪贴板操作
+    
+    Returns:
+        columns: 8列纸牌布局
+        red_first, black_first: 用于跟踪花色分配
     """
     # 初始化8列，每列7个空位（最大可能的牌数）
     columns = [["  " for _ in range(7)] for _ in range(8)]
@@ -230,6 +236,21 @@ def format_freecell_layout(results, root=None):
             if 0 <= col < 8 and 0 <= row < 7:
                 columns[col][row] = f"{number}{suit}"
     
+    return columns, red_first, black_first
+
+# 新增函数：格式化列布局为文本
+def format_columns_to_text(columns, include_validation=True):
+    """将列布局格式化为文本
+    
+    Args:
+        columns: 8列纸牌布局
+        include_validation: 是否包含验证结果
+    
+    Returns:
+        layout_lines: 格式化后的布局文本行
+        is_valid: 布局是否有效
+        errors: 验证错误列表
+    """
     # 格式化输出
     layout_lines = []
     layout_lines.append("# MS Freecell Game Layout")
@@ -244,21 +265,36 @@ def format_freecell_layout(results, root=None):
     # 验证牌组是否完整合法
     is_valid, errors = validate_cards(columns)
     
-    # 添加验证结果到GUI显示，但不添加到剪贴板内容
-    if is_valid:
+    # 添加验证结果
+    if include_validation:
         layout_lines.append("")
-        layout_lines.append("# 牌组完整且合法")
-    else:
-        layout_lines.append("")
-        layout_lines.append("# 牌组不完整或不合法")
-        for error in errors:
-            layout_lines.append(f"# {error}")
+        if is_valid:
+            layout_lines.append("# 牌组完整且合法")
+        else:
+            layout_lines.append("# 牌组不完整或不合法")
+            for error in errors:
+                layout_lines.append(f"# {error}")
+    
+    return layout_lines, is_valid, errors
+
+def format_freecell_layout(results, root=None):
+    """将识别结果格式化为MS Freecell布局
+    
+    Args:
+        results: 识别结果列表
+        root: 可选的Tkinter根窗口，用于剪贴板操作
+    """
+    # 转换结果为列布局
+    columns, _, _ = results_to_columns(results)
+    
+    # 格式化为文本
+    layout_lines, is_valid, errors = format_columns_to_text(columns)
     
     # 复制到剪贴板的内容不包含验证结果
     clipboard_lines = layout_lines[:-2] if is_valid else layout_lines[:-2-len(errors)]
     
     # 如果提供了root，则复制到剪贴板
-    if root:
+    if root and is_valid:
         try:
             clipboard_text = "\n".join(clipboard_lines)
             root.clipboard_clear()
@@ -269,11 +305,11 @@ def format_freecell_layout(results, root=None):
             print(f"\n复制到剪贴板失败: {str(e)}")
     
     return layout_lines  # 返回完整的布局行（包括验证结果）
-def process_all_cards(template_dir: str = 'Card_Rank_Templates/set_1'):
+def process_all_cards(template_dir: str = 'Card_Rank_Templates/set_1920x1080'):  # 修改默认模板路径
     """处理所有纸牌图像并生成布局
     
     Args:
-        template_dir: 模板目录路径，默认为'Card_Rank_Templates/set_1'
+        template_dir: 模板目录路径，默认为'Card_Rank_Templates/set_1920x1080'
     """
     start_time = time.time()
     input_dir = 'Card_Rank_Images'
@@ -281,10 +317,28 @@ def process_all_cards(template_dir: str = 'Card_Rank_Templates/set_1'):
         print(f"{input_dir}目录不存在")
         return []
     
+    # 检查模板目录是否存在
+    if not os.path.exists(template_dir):
+        # 尝试查找可用的模板集
+        template_base = 'Card_Rank_Templates'
+        available_sets = []
+        if os.path.exists(template_base):
+            for d in os.listdir(template_base):
+                dir_path = os.path.join(template_base, d)
+                if d.startswith('set_') and os.path.isdir(dir_path) and os.listdir(dir_path):
+                    available_sets.append(d)
+        
+        if available_sets:
+            template_dir = os.path.join(template_base, available_sets[0])
+            print(f"使用可用的模板集: {template_dir}")
+        else:
+            print(f"错误: 未找到可用的模板集")
+            return []
+    
     # 初始化
     image_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
     results = []
-    success_count = 0  # 添加成功识别计数器
+    success_count = 0
     
     # 清空日志文件
     with open('Card_Match_Result.log', 'w', encoding='utf-8') as f:
@@ -306,7 +360,7 @@ def process_all_cards(template_dir: str = 'Card_Rank_Templates/set_1'):
         
         if number:
             results.append({'number': number, 'color': color, 'filename': filename})
-            success_count += 1  # 只有成功识别时才增加计数
+            success_count += 1
     
     # 生成布局
     if results:
@@ -321,10 +375,11 @@ def process_all_cards(template_dir: str = 'Card_Rank_Templates/set_1'):
             for line in layout:
                 f.write(line + "\n")
     
-    # 输出统计 - 修改为只统计成功识别的卡片
+    # 输出统计
     total_time = int((time.time() - start_time) * 1000)
     print(f"\n共识别成功 {success_count} 张卡牌，总用时 {total_time}ms")
     return results
 
 if __name__ == '__main__':
+    # 当直接运行时，使用默认的高分辨率模板集
     results = process_all_cards()

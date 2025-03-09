@@ -296,6 +296,16 @@ class FreecellOCRApp:
             messagebox.showerror("错误", f"加载预览图像失败: {str(e)}")
             self.preview_label.configure(image='')
             self.preview_label.image = None
+
+    def copy_to_clipboard(self, text):
+        """复制文本到剪贴板（线程安全）"""
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.root.update()  # 确保更新剪贴板
+        except Exception as e:
+            print(f"复制到剪贴板失败: {str(e)}")
+
     def run_processing(self, image_path):
         """在后台线程中运行图像处理"""
         try:
@@ -329,6 +339,7 @@ class FreecellOCRApp:
             sys.stdout = GuiOutput(self.result_text)
             
             try:
+                # 步骤1: 分割纸牌
                 splitter = CardSplitter()
                 splitter.split_cards(image)
                 self.update_result("✓ 纸牌分割完成，已保存到Single_Card_Images目录\n")
@@ -352,11 +363,6 @@ class FreecellOCRApp:
                 # 在识别开始前创建日志文件
                 log_file = open("Card_Match_Result.log", "w", encoding="utf-8")
                 log_file.write("识别结果,文件名,点数,匹配度,匹配次数,用时,方法\n")
-                
-                # 在run_processing方法中，修改调用match_card_rank的部分
-                # 使用选定的模板集进行识别
-                template_manager = match_numbers.TemplateManager(template_dir)
-                matcher = match_numbers.RankMatcher(template_manager)
                 
                 # 处理所有卡片
                 results = []
@@ -392,54 +398,55 @@ class FreecellOCRApp:
                             'filename': filename
                         })
                 
-                # 格式化输出
+                # 格式化输出 - 修复缩进，将这部分代码移出循环
                 if results:
-                    # 使用match_numbers.format_freecell_layout生成布局
-                    layout = match_numbers.format_freecell_layout(results, None)  # 先不传入root，避免自动复制到剪贴板
+                    # 使用新的函数生成布局
+                    columns, red_first, black_first = match_numbers.results_to_columns(results)
+                    layout_lines, is_valid, errors = match_numbers.format_columns_to_text(columns)
                     
                     # 显示在GUI中
                     self.update_result("\nFreecell Layout:\n")
-                    for line in layout:
+                    for line in layout_lines:
                         self.update_result(line + "\n")
                     
                     # 写入日志文件
-                    log_file.write("\n")
-                    for line in layout:
-                        log_file.write(line + "\n")
+                    with open("Card_Match_Result.log", "a", encoding="utf-8") as log_file:
+                        log_file.write("\n")
+                        for line in layout_lines:
+                            log_file.write(line + "\n")
                     
                     # 检查是否所有卡片都识别成功且通过完整性验证
                     all_recognized = all(result['number'] != '?' for result in results)
-                    # 检查布局中是否包含验证成功的信息
-                    validation_passed = any("牌组完整且合法" in line for line in layout)
                     
-                    # 仅当所有卡片识别成功且通过完整性验证时才复制到剪贴板
-                    if all_recognized and validation_passed:
+                    # 仅当所有卡片都识别成功且通过完整性验证时才复制到剪贴板
+                    if all_recognized and is_valid:
                         # 提取不包含验证信息的布局行
-                        clipboard_lines = []
-                        for line in layout:
-                            if not line.startswith("# 牌组"):
-                                clipboard_lines.append(line)
+                        clipboard_lines = layout_lines[:-2] if is_valid else layout_lines[:-2-len(errors)]
                         
                         # 复制到剪贴板
                         clipboard_text = "\n".join(clipboard_lines)
-                        self.root.clipboard_clear()
-                        self.root.clipboard_append(clipboard_text)
-                        self.root.update()
-                        self.update_result("\n布局已自动复制到剪贴板\n")
-                        log_file.write("\n布局已自动复制到剪贴板\n")
-                    # 移除未复制到剪贴板时的提示和记录
+                        self.root.after(0, lambda: self.copy_to_clipboard(clipboard_text))
+                        self.update_result("\n布局已复制到剪贴板\n")
+                    else:
+                        self.update_result("\n布局未通过完整性验证，未复制到剪贴板\n")
                 
-                # 在run_processing方法中，修改统计部分
                 # 输出统计
                 success_count = sum(1 for result in results if result['number'] != '?')
                 total_time = int((time.time() - start_time) * 1000)
                 summary = f"\n共识别成功 {success_count} 张卡牌，总用时 {total_time}ms"
                 self.update_result(summary)
-                log_file.write(summary + "\n")
-                    
+                
+                # 确保日志文件仍然打开时才写入
+                if log_file and not log_file.closed:
+                    log_file.write(summary + "\n")
+                else:
+                    # 如果日志文件已关闭，重新打开并追加
+                    with open("Card_Match_Result.log", "a", encoding="utf-8") as append_log:
+                        append_log.write(summary + "\n")
             finally:
                 sys.stdout = original_stdout
-                if log_file:
+                # 确保日志文件存在且打开时才关闭
+                if log_file and not log_file.closed:
                     log_file.close()  # 关闭日志文件
                 
             self.update_status("处理完成")
@@ -449,6 +456,7 @@ class FreecellOCRApp:
         finally:
             # 完成处理
             self.root.after(0, self.finish_processing)
+
     def update_status(self, message):
         """更新状态信息（线程安全）"""
         self.root.after(0, lambda: self.status_var.set(message))
@@ -560,13 +568,14 @@ class FreecellOCRApp:
             messagebox.showinfo("提示", "请先选择有效的图像文件")
             return
         
-        # 创建查看器窗口
-        viewer = CardViewerWindow(self.root, image_path)
+        # 修改这里：传递self.root而不是self作为父窗口
+        viewer = CardViewerWindow(self.root, image_path, self)
 
 # 添加新的卡片查看器窗口类
 class CardViewerWindow:
-    def __init__(self, parent, image_path):
-        self.parent = parent
+    def __init__(self, parent, image_path, app=None):
+        self.parent = parent  # 这是Tkinter窗口对象
+        self.app = app  # 这是FreecellOCRApp实例
         self.image_path = image_path
         
         # 创建新窗口
@@ -590,7 +599,7 @@ class CardViewerWindow:
         
         # 绑定窗口关闭事件
         self.window.protocol("WM_DELETE_WINDOW", self.on_closing)
-        
+                
     def create_widgets(self):
         """创建界面组件"""
         # 主框架
@@ -615,6 +624,8 @@ class CardViewerWindow:
         
         # 创建8x7网格
         self.card_labels = []
+        self.all_entries = []  # 存储所有文本框，用于导航
+        
         for row in range(7):
             row_labels = []
             for col in range(8):
@@ -635,8 +646,23 @@ class CardViewerWindow:
                 id_entry = ttk.Entry(frame, textvariable=id_var, width=4, justify='center')
                 id_entry.pack(side=tk.RIGHT, padx=2)
                 
+                # 将文本框添加到列表中，用于导航
+                self.all_entries.append((row, col, id_entry))
+                
                 # 绑定文本变化事件
                 id_var.trace_add("write", lambda name, index, mode, r=row, c=col, v=id_var: self.on_text_changed(r, c, v))
+
+                # 绑定按键事件
+                id_entry.bind("<Return>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "down"))
+                id_entry.bind("<Tab>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "right"))
+                id_entry.bind("<Shift-Return>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "up"))
+                id_entry.bind("<Shift-Tab>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "left"))
+                
+                # 添加方向键绑定
+                id_entry.bind("<Down>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "down"))
+                id_entry.bind("<Right>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "right"))
+                id_entry.bind("<Up>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "up"))
+                id_entry.bind("<Left>", lambda event, r=row, c=col: self.navigate_entries(event, r, c, "left"))
                 
                 row_labels.append((card_label, id_entry, frame, id_var))
             self.card_labels.append(row_labels)
@@ -646,6 +672,57 @@ class CardViewerWindow:
             self.cards_frame.columnconfigure(i, weight=1)
         for i in range(7):
             self.cards_frame.rowconfigure(i, weight=1)
+    
+    def navigate_entries(self, event, current_row, current_col, direction):
+        """在文本框之间导航
+        
+        Args:
+            event: 按键事件
+            current_row: 当前行
+            current_col: 当前列
+            direction: 导航方向 ("up", "down", "left", "right")
+        """
+        # 计算下一个位置
+        next_row, next_col = current_row, current_col
+        
+        if direction == "down":
+            next_row = (current_row + 1) % 7
+            # 如果是最后一行的无效位置，调整到有效位置
+            if next_row == 6 and next_col >= 4:
+                next_col = 3  # 移动到最后一行的最后一个有效列
+        elif direction == "up":
+            next_row = (current_row - 1) % 7
+            # 如果是最后一行的无效位置，调整到有效位置
+            if next_row == 6 and next_col >= 4:
+                next_col = 3  # 移动到最后一行的最后一个有效列
+        elif direction == "right":
+            next_col = (current_col + 1) % 8
+            # 如果移动到下一行
+            if next_col == 0:
+                next_row = (current_row + 1) % 7
+            # 如果是最后一行的无效位置，调整到下一个有效位置
+            if next_row == 6 and next_col >= 4:
+                next_row = 0
+                next_col = 0  # 回到第一行第一列
+        elif direction == "left":
+            next_col = (current_col - 1) % 8
+            # 如果移动到上一行
+            if next_col == 7:
+                next_row = (current_row - 1) % 7
+            # 如果是最后一行的无效位置，调整到上一个有效位置
+            if next_row == 6 and next_col >= 4:
+                next_row = 6
+                next_col = 3  # 移动到最后一行的最后一个有效列
+        
+        # 查找下一个文本框并设置焦点
+        for row, col, entry in self.all_entries:
+            if row == next_row and col == next_col:
+                entry.focus_set()
+                entry.select_range(0, tk.END)  # 选中所有文本
+                break
+        
+        # 重要：返回"break"以阻止默认的Tab行为
+        return "break"
     
     def on_text_changed(self, row, col, var):
         """文本框内容变化时的回调函数"""
@@ -745,40 +822,47 @@ class CardViewerWindow:
         try:
             # 准备修改后的结果
             results = []
-            for position_key, card_info in self.card_values.items():
-                row, col = map(int, position_key.split(','))
+            
+            # 遍历所有文本框，获取用户输入的值
+            for row, col, entry in self.all_entries:
+                position_key = f"{row},{col}"
+                
                 # 获取用户输入的值
-                card_value = card_info['value'].strip()
+                card_value = entry.get().strip()
                 
-                # 确保卡片值格式正确（例如：Ah, 2c, 10d 等）
-                # 标准化卡片值格式
-                if len(card_value) >= 1:
-                    # 提取数字/字母部分和花色部分
-                    if len(card_value) == 1:
-                        # 如果只有一个字符，假设它是数字/字母部分，使用原始颜色
-                        rank = card_value.upper()
-                        suit = 'H' if card_info['color_type'] == 'r' else 'S'  # 默认红桃或黑桃
-                    else:
-                        # 否则，假设最后一个字符是花色
-                        rank = card_value[:-1].upper()
-                        suit = card_value[-1].upper()  # 确保花色是大写
+                # 如果该位置有对应的卡片信息
+                if position_key in self.card_values:
+                    card_info = self.card_values[position_key]
                     
-                    # 标准化花色（确保是H, D, C, S中的一个）
-                    if suit not in ['H', 'D', 'C', 'S']:
-                        if card_info['color_type'] == 'r':
-                            suit = 'H'  # 默认红桃
+                    # 确保卡片值格式正确（例如：Ah, 2c, 10d 等）
+                    # 标准化卡片值格式
+                    if len(card_value) >= 1:
+                        # 提取数字/字母部分和花色部分
+                        if len(card_value) == 1:
+                            # 如果只有一个字符，假设它是数字/字母部分，使用原始颜色
+                            rank = card_value.upper()
+                            suit = 'H' if card_info['color_type'] == 'r' else 'S'  # 默认红桃或黑桃
                         else:
-                            suit = 'S'  # 默认黑桃
+                            # 否则，假设最后一个字符是花色
+                            rank = card_value[:-1].upper()
+                            suit = card_value[-1].upper()  # 确保花色是大写
+                        
+                        # 标准化花色（确保是H, D, C, S中的一个）
+                        if suit not in ['H', 'D', 'C', 'S']:
+                            if card_info['color_type'] == 'r':
+                                suit = 'H'  # 默认红桃
+                            else:
+                                suit = 'S'  # 默认黑桃
+                        
+                        # 重新组合卡片值
+                        card_value = rank + suit
                     
-                    # 重新组合卡片值
-                    card_value = rank + suit
-                
-                results.append({
-                    'number': card_value,
-                    'color': card_info['color_type'],
-                    'filename': card_info['filename'],
-                    'position': (row, col)  # 添加位置信息用于排序
-                })
+                    results.append({
+                        'number': rank,  # 只保存点数部分
+                        'color': 'r' if suit in ['H', 'D'] else 'b',  # 根据花色确定颜色
+                        'filename': card_info['filename'],
+                        'position': (row, col)  # 添加位置信息用于排序
+                    })
             
             # 按照位置排序结果，确保卡片顺序正确
             # 先按行排序，再按列排序
@@ -788,34 +872,39 @@ class CardViewerWindow:
             for result in results:
                 result.pop('position', None)
             
-            # 使用match_numbers模块格式化输出
-            layout = match_numbers.format_freecell_layout(results, None)
+            # 使用新的函数生成布局
+            columns, red_first, black_first = match_numbers.results_to_columns(results)
+            layout_lines, is_valid, errors = match_numbers.format_columns_to_text(columns)
             
             # 写入日志文件
             with open("Card_Match_Result.log", "a", encoding="utf-8") as log_file:
                 log_file.write("\n\n# 手动修改后的结果\n")
-                for line in layout:
+                for line in layout_lines:
                     log_file.write(line + "\n")
             
             # 检查是否所有卡片都识别成功且通过完整性验证
             all_recognized = all(result['number'] != '?' for result in results)
-            validation_passed = any("牌组完整且合法" in line for line in layout)
             
             # 在主界面的结果文本框中显示修改后的布局
-            app = self.window.master
-            if hasattr(app, 'result_text'):
-                app.result_text.insert(tk.END, "\n\n# 手动修改后的结果\n")
-                for line in layout:
-                    app.result_text.insert(tk.END, line + "\n")
-                app.result_text.see(tk.END)  # 自动滚动到最新内容
-            
+            try:
+                # 使用self.app访问主应用程序实例
+                if self.app and hasattr(self.app, 'result_text'):
+                    # 添加分隔行
+                    self.app.result_text.insert(tk.END, "\n\n# 手动修改后的结果\n")
+                    # 添加每一行布局
+                    for line in layout_lines:
+                        self.app.result_text.insert(tk.END, line + "\n")
+                    # 滚动到最新内容
+                    self.app.result_text.see(tk.END)
+                else:
+                    print("未找到主界面的result_text控件，仅保存到日志文件")
+            except Exception as e:
+                print(f"向主界面添加结果时出错: {str(e)}")
+
             # 仅当所有卡片识别成功且通过完整性验证时才复制到剪贴板
-            if all_recognized and validation_passed:
+            if all_recognized and is_valid:
                 # 提取不包含验证信息的布局行
-                clipboard_lines = []
-                for line in layout:
-                    if not line.startswith("# 牌组"):
-                        clipboard_lines.append(line)
+                clipboard_lines = layout_lines[:-2] if is_valid else layout_lines[:-2-len(errors)]
                 
                 # 复制到剪贴板
                 clipboard_text = "\n".join(clipboard_lines)
@@ -825,8 +914,11 @@ class CardViewerWindow:
                 messagebox.showinfo("保存成功", "修改后的布局已保存并复制到剪贴板")
             else:
                 messagebox.showinfo("保存成功", "修改后的布局已保存，但未通过完整性验证，未复制到剪贴板")
-                
+
         except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            print(f"保存修改后的结果失败: {str(e)}\n{error_details}")
             messagebox.showerror("保存失败", f"保存修改后的结果失败: {str(e)}")
 
     def load_image(self):
