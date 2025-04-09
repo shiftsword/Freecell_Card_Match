@@ -3,3 +3,10 @@ Card_Rank_Images/*
 Single_Card_Images/*
 Card_Match_Result.log
 Card_Match_Result.log
+dist/*
+build/*
+upx.exe
+nuitka-crash-report.xml
+build.py
+71.0.0
+fspacker.config.py

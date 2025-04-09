@@ -1,0 +1,11 @@
+# 图像处理
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+
+# GUI (tkinter通常包含在Python标准库中)
+# 如果在某些Linux系统上需要单独安装tkinter:
+# python3-tk
+
+# 类型提示支持
+typing-extensions>=4.7.0
