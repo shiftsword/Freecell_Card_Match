@@ -1,8 +1,9 @@
 venv/*
 __pycache__/*
 Card_Rank_Images/*
+Card_Suit_Images/*
 Single_Card_Images/*
-Card_Match_Result.log
+Card_Suit_Templates/*
 Card_Match_Result.log
 dist/*
 build/*
