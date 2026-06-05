@@ -40,24 +40,18 @@ class FreecellOCRApp:
         # 加载模板集选项
         self.load_template_sets()
     def create_template(self):
-        """打开模板创建工具"""
         try:
-            # 检查是否已选择图片
             image_path = self.image_path.get()
             if not image_path or not os.path.exists(image_path):
                 messagebox.showinfo("提示", "请先选择有效的图像文件")
                 return
                 
-            # 保存当前图像为Freecell_Layout.png
             self.save_current_image_as_layout()
                 
-            # 自动执行卡片分割和数字提取
             self.result_text.delete(1.0, tk.END)
             self.result_text.insert(tk.END, "正在准备模板创建...\n")
             
-            # 步骤1: 分割纸牌
             self.update_status("准备模板: 分割纸牌...")
-            # 使用numpy读取图像以支持中文路径
             image = cv2.imdecode(np.fromfile(image_path, dtype=np.uint8), cv2.IMREAD_COLOR)
             if image is None:
                 raise Exception("无法读取图像")
@@ -66,26 +60,31 @@ class FreecellOCRApp:
             splitter.split_cards(image)
             self.update_result("✓ 纸牌分割完成，已保存到Single_Card_Images目录\n")
             
-            # 步骤2: 提取数字
-            self.update_status("准备模板: 提取数字...")
+            self.update_status("准备模板: 提取数字和花色...")
             extract_numbers.process_cards()
-            self.update_result("✓ 数字提取完成，已保存到Card_Rank_Images目录\n")
+            self.update_result("✓ 数字和花色提取完成，已保存到Card_Rank_Images和Card_Suit_Images目录\n")
             
-            # 导入模板创建模块
             import create_templates
+            import create_suit_templates
             import importlib
-            importlib.reload(create_templates)  # 确保加载最新版本
+            importlib.reload(create_templates)
+            importlib.reload(create_suit_templates)
                 
-            # 创建新窗口运行模板创建工具
             template_window = tk.Toplevel(self.root)
             app = create_templates.TemplateCreator(template_window)
                 
-            # 设置模态窗口
             template_window.transient(self.root)
             template_window.grab_set()
                 
-            # 等待窗口关闭后重新加载模板集
             self.root.wait_window(template_window)
+            
+            suit_template_window = tk.Toplevel(self.root)
+            suit_app = create_suit_templates.SuitTemplateCreator(suit_template_window)
+            
+            suit_template_window.transient(self.root)
+            suit_template_window.grab_set()
+            
+            self.root.wait_window(suit_template_window)
             self.load_template_sets()
             
             self.update_status("就绪")
@@ -94,9 +93,7 @@ class FreecellOCRApp:
             messagebox.showerror("错误", f"启动模板创建工具失败: {str(e)}")
             self.update_status(f"处理失败: {str(e)}")
     def check_directories(self):
-        """检查并创建必要的目录"""
-        # 清空并重建目录
-        dirs = ["Single_Card_Images", "Card_Rank_Images"]  # 修改为实际使用的目录名
+        dirs = ["Single_Card_Images", "Card_Rank_Images", "Card_Suit_Images"]
         for dir_name in dirs:
             if os.path.exists(dir_name):
                 for file in os.listdir(dir_name):
@@ -352,56 +349,66 @@ class FreecellOCRApp:
                 if not os.path.exists(template_dir):
                     raise Exception(f"模板目录不存在: {template_dir}")
                 
-                # 步骤2: 提取数字
-                self.update_status("步骤2/3: 提取数字...")
+                self.update_status("步骤2/3: 提取数字和花色...")
                 extract_numbers.process_cards()
-                self.update_result("✓ 数字提取完成，已保存到Card_Rank_Images目录\n")
+                self.update_result("✓ 数字和花色提取完成，已保存到Card_Rank_Images和Card_Suit_Images目录\n")
                 
-                # 步骤3: 识别数字并生成布局
-                self.update_status("步骤3/3: 识别数字并生成布局...")
+                self.update_status("步骤3/3: 识别数字和花色并生成布局...")
                 
-                # 在识别开始前创建日志文件
                 log_file = open("Card_Match_Result.log", "w", encoding="utf-8")
-                log_file.write("识别结果,文件名,点数,匹配度,匹配次数,用时,方法\n")
+                log_file.write("识别结果,文件名,点数,花色,匹配度,用时\n")
                 
-                # 处理所有卡片
                 results = []
                 start_time = time.time()
                 input_dir = 'Card_Rank_Images'
+                suit_dir = 'Card_Suit_Images'
                 image_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
                 
                 for filename in image_files:
-                    image_path = os.path.join(input_dir, filename)
+                    rank_path = os.path.join(input_dir, filename)
+                    suit_path = os.path.join(suit_dir, filename)
                     
-                    # 使用match_card_rank函数进行识别，传入模板目录
-                    number, confidence, match_count, process_time = match_numbers.match_card_rank(image_path, template_dir)
+                    number, confidence, match_count, process_time = match_numbers.match_card_rank(rank_path, template_dir)
                     color_simple = 'r' if '_r.' in filename else 'b'
                     
-                    # 记录结果
-                    error_msg = "识别失败" if number is None else ""
-                    log_line = match_numbers.create_log_line(filename, number, color_simple, confidence, match_count, process_time, error_msg)
+                    suit = None
+                    suit_confidence = 0
+                    suit_time = 0
+                    if os.path.exists(suit_path):
+                        suit_template_dir = 'Card_Suit_Templates/set_1'
+                        if os.path.exists(suit_template_dir):
+                            suit, suit_confidence, suit_count, suit_time = match_numbers.match_card_suit(suit_path, suit_template_dir)
+                    
+                    if suit is None:
+                        if color_simple == 'r':
+                            suit = 'H'
+                        else:
+                            suit = 'S'
+                    
+                    log_line = f"识别成功: {filename} , {number}{suit} , [{confidence:.1f}%] , [{process_time + suit_time}ms]\n"
+                    if number is None:
+                        log_line = f"识别失败: {filename} , FAIL , [0.0%] , [{process_time + suit_time}ms]\n"
+                    
                     log_file.write(log_line)
                     self.update_result(log_line.strip() + "\n")
                     
-                    # 即使识别失败也添加到结果中，使用默认值
                     if number:
                         results.append({
                             'number': number, 
+                            'suit': suit,
                             'color': color_simple, 
                             'filename': filename
                         })
                     else:
-                        # 添加一个占位符结果，以便在布局中显示未识别的卡片
                         results.append({
                             'number': '?', 
+                            'suit': suit,
                             'color': color_simple, 
                             'filename': filename
                         })
                 
-                # 格式化输出 - 修复缩进，将这部分代码移出循环
                 if results:
-                    # 使用新的函数生成布局
-                    columns, red_first, black_first = match_numbers.results_to_columns(results)
+                    columns = match_numbers.results_to_columns(results)
                     layout_lines, is_valid, errors = match_numbers.format_columns_to_text(columns)
                     
                     # 显示在GUI中
@@ -472,8 +479,7 @@ class FreecellOCRApp:
         self.process_btn.config(state=tk.NORMAL)
         
     def clear_image_directories(self):
-        """清空图像处理目录"""
-        dirs = ["Single_Card_Images", "Card_Rank_Images"]
+        dirs = ["Single_Card_Images", "Card_Rank_Images", "Card_Suit_Images"]
         for dir_name in dirs:
             if os.path.exists(dir_name):
                 for file in os.listdir(dir_name):
@@ -858,22 +864,19 @@ class CardViewerWindow:
                         card_value = rank + suit
                     
                     results.append({
-                        'number': rank,  # 只保存点数部分
-                        'color': 'r' if suit in ['H', 'D'] else 'b',  # 根据花色确定颜色
+                        'number': rank,
+                        'suit': suit,
+                        'color': 'r' if suit in ['H', 'D'] else 'b',
                         'filename': card_info['filename'],
-                        'position': (row, col)  # 添加位置信息用于排序
+                        'position': (row, col)
                     })
             
-            # 按照位置排序结果，确保卡片顺序正确
-            # 先按行排序，再按列排序
             results.sort(key=lambda x: (x['position'][0], x['position'][1]))
             
-            # 移除临时的位置信息
             for result in results:
                 result.pop('position', None)
             
-            # 使用新的函数生成布局
-            columns, red_first, black_first = match_numbers.results_to_columns(results)
+            columns = match_numbers.results_to_columns(results)
             layout_lines, is_valid, errors = match_numbers.format_columns_to_text(columns)
             
             # 写入日志文件
