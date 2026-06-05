@@ -49,7 +49,7 @@ def extract_number(image_path, padding=2):
     
     # 分析ROI区域内的颜色分布
     h, s, v = cv2.split(roi)
-    
+
     # 创建掩码，分别处理红色和黑色数字
     # 红色掩码（处理红心和方块）
     lower_red1 = np.array([0, 100, 100])
@@ -59,19 +59,29 @@ def extract_number(image_path, padding=2):
     red_mask1 = cv2.inRange(roi, lower_red1, upper_red1)
     red_mask2 = cv2.inRange(roi, lower_red2, upper_red2)
     red_mask = red_mask1 + red_mask2
-    
+
+    # 黄色/金色发光掩码（纸牌边缘发光效果，H:15-35, S:50-255, V:150-255）
+    # 发光像素会落入红色范围(H:0-10)的邻近区域，需先排除
+    lower_glow = np.array([15, 50, 150])
+    upper_glow = np.array([35, 255, 255])
+    glow_mask = cv2.inRange(roi, lower_glow, upper_glow)
+
+    # 从红色掩码中去除发光像素（发光区域可能与红色区域有重叠）
+    red_mask = cv2.bitwise_and(red_mask, cv2.bitwise_not(glow_mask))
+
     # 黑色掩码（处理黑桃和梅花）
     lower_black = np.array([0, 0, 0])
     upper_black = np.array([180, 255, 50])
     black_mask = cv2.inRange(roi, lower_black, upper_black)
-    
+
     # 确定颜色类型
     red_pixels = cv2.countNonZero(red_mask)
     black_pixels = cv2.countNonZero(black_mask)
     color_type = '_r' if red_pixels > black_pixels else '_b'
-    
-    # 合并掩码
+
+    # 合并掩码（排除发光像素，避免污染数字区域）
     combined_mask = cv2.bitwise_or(red_mask, black_mask)
+    combined_mask = cv2.bitwise_and(combined_mask, cv2.bitwise_not(glow_mask))
     
     # 寻找连通区域
     contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)

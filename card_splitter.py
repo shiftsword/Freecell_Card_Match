@@ -62,10 +62,18 @@ class CardSplitter:
         valid_contours.sort(key=lambda x: x[0])
         if len(valid_contours) != 8:
             raise ValueError(f"检测到 {len(valid_contours)} 列，应为8列")
-            
+        
+        # 统一列宽度：使用中位数宽度，消除发光效果导致的宽度不一致
+        widths = [c[2] for c in valid_contours[:8]]
+        median_w = int(np.median(widths))
+        
         columns = []
         for x, y, w, h in valid_contours[:8]:
-            column = image[y:y+h, x:x+w]
+            # 使用统一宽度居中裁切，避免发光边缘干扰
+            center_x = x + w // 2
+            crop_x = max(0, center_x - median_w // 2)
+            crop_x_end = min(image.shape[1], crop_x + median_w)
+            column = image[y:y+h, crop_x:crop_x_end]
             columns.append(column)
             
         return columns, valid_contours[:8]

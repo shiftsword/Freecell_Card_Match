@@ -136,10 +136,6 @@ def match_card_rank(image_path: str, template_dir: str = 'Card_Rank_Templates/se
     """
     start_time = time.time()
     try:
-        # 初始化，使用传入的模板目录
-        template_manager = TemplateManager(template_dir)
-        matcher = RankMatcher(template_manager)
-
         # 读取图像
         image = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
         if image is None:
@@ -148,8 +144,28 @@ def match_card_rank(image_path: str, template_dir: str = 'Card_Rank_Templates/se
         # 确定颜色
         color = '_r' if '_r.' in image_path else '_b'
 
-        # 执行匹配
+        # 使用主模板集进行匹配
+        template_manager = TemplateManager(template_dir)
+        matcher = RankMatcher(template_manager)
         result, confidence, match_count = matcher.match_rank(image, color)
+        
+        # 如果主模板集匹配失败，尝试其他可用模板集
+        if result is None:
+            template_base = 'Card_Rank_Templates'
+            if os.path.exists(template_base):
+                for d in sorted(os.listdir(template_base)):
+                    alt_dir = os.path.join(template_base, d)
+                    if d.startswith('set_') and os.path.isdir(alt_dir) and alt_dir != template_dir:
+                        try:
+                            alt_manager = TemplateManager(alt_dir)
+                            alt_matcher = RankMatcher(alt_manager)
+                            alt_result, alt_confidence, alt_count = alt_matcher.match_rank(image, color)
+                            match_count += alt_count
+                            if alt_result is not None:
+                                result, confidence = alt_result, alt_confidence
+                                break
+                        except:
+                            continue
             
         process_time = int((time.time() - start_time) * 1000)
         return result, confidence, match_count, process_time

@@ -1,3 +1,4 @@
+venv/*
 __pycache__/*
 Card_Rank_Images/*
 Single_Card_Images/*
@@ -10,3 +11,5 @@ nuitka-crash-report.xml
 build.py
 71.0.0
 fspacker.config.py
+Freecell_Layout_1.png
+Freecell_Layout_2.png
