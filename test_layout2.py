@@ -70,7 +70,7 @@ for filename in image_files:
         fail_count += 1
 
 if results:
-    columns, _, _ = match_numbers.results_to_columns(results)
+    columns = match_numbers.results_to_columns(results)
     layout_lines, is_valid, errors = match_numbers.format_columns_to_text(columns)
 
     print("\n识别结果布局:")
