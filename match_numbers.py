@@ -80,8 +80,8 @@ class SuitTemplateManager:
 class SuitMatcher:
     def __init__(self, template_manager: SuitTemplateManager):
         self.template_manager = template_manager
-        self.size_threshold = 0.3
-        self.match_threshold = 0.7
+        self.size_threshold = 0.1
+        self.match_threshold = 0.5
 
     def calculate_size_similarity(self, img_size: Tuple[int, int], 
                                 tmpl_size: Tuple[int, int]) -> float:

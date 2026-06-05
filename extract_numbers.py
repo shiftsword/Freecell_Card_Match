@@ -138,56 +138,56 @@ def extract_suit_from_image(img, color_type):
         upper_black = np.array([180, 255, 50])
         color_mask = cv2.inRange(hsv, lower_black, upper_black)
     
-    search_y_start = int(height * 0.4)
-    search_region = color_mask[search_y_start:height, 0:width]
+    # 按卡片尺寸计算比例参数（参考: 149x58 卡片）
+    all_mask = cv2.bitwise_or(color_mask, cv2.inRange(hsv, np.array([0,0,0]), np.array([180,255,50])))
+    all_mask = cv2.bitwise_and(all_mask, cv2.bitwise_not(glow_mask))
     
-    contours, _ = cv2.findContours(search_region, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
-    if not contours:
-        suit_output = np.zeros((10, 10), dtype=np.uint8)
-        suit_output[:] = 255
-        return suit_output
-    
-    valid_contours = []
+    scale = height / 58.0  # 相对于标准58像素高度的缩放比
+    rank_y_limit = int(height * 0.26)     # 标准: 15/58
+    rank_x_limit = int(width * 0.17)      # 标准: 25/149
+    min_area = int(30 * scale * scale)     # 标准: 30
+    default_rank_bottom = int(height * 0.47)  # 标准: 27/58
+    search_height = int(height * 0.38)     # 标准: 22/58
+    search_x_max = int(width * 0.20)       # 标准: 30/149
+
+    # 步骤1: 找到点数区域底部（左上角轮廓）
+    contours, _ = cv2.findContours(all_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    rank_bottom = 0
     for cnt in contours:
         area = cv2.contourArea(cnt)
-        if area > 20:
-            valid_contours.append(cnt)
+        if area > min_area:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            if y < rank_y_limit and x < rank_x_limit:
+                rank_bottom = max(rank_bottom, y + ch)
+    if rank_bottom == 0:
+        rank_bottom = default_rank_bottom
     
-    if not valid_contours:
+    # 步骤2: 在点数下方、左半区域搜索花色符号
+    search_start = rank_bottom + int(2 * scale)
+    search_end = min(height, rank_bottom + search_height)
+    suit_region = all_mask[search_start:search_end, 0:search_x_max]
+    
+    # 步骤3: 找到花色像素的边界框
+    points = cv2.findNonZero(suit_region)
+    if points is None or len(points) < 5:
         suit_output = np.zeros((10, 10), dtype=np.uint8)
         suit_output[:] = 255
         return suit_output
     
-    max_contour = max(valid_contours, key=cv2.contourArea)
-    x, y, w, h = cv2.boundingRect(max_contour)
-    y = y + search_y_start
-    
+    x, y, cw, ch = cv2.boundingRect(points)
     padding = 2
-    x_start = max(0, x - padding)
-    x_end = min(width, x + w + padding)
-    y_start = max(0, y - padding)
-    y_end = min(height, y + h + padding)
+    y1 = max(0, y + search_start - padding)
+    y2 = min(height, y + search_start + ch + padding)
+    x1 = max(0, x - padding)
+    x2 = min(search_x_max, x + cw + padding)
     
-    suit_region = color_mask[y_start:y_end, x_start:x_end]
+    suit_crop = all_mask[y1:y2, x1:x2]
     
-    suit_padded = np.zeros((y_end - y_start, x_end - x_start), dtype=np.uint8)
-    suit_padded[:] = 0
-    
-    if suit_region.shape[0] > 0 and suit_region.shape[1] > 0:
-        suit_padded[0:suit_region.shape[0], 0:suit_region.shape[1]] = suit_region
-    
-    kernel = np.ones((2,2), np.uint8)
-    suit_padded = cv2.dilate(suit_padded, kernel, iterations=1)
-    suit_padded = cv2.erode(suit_padded, kernel, iterations=1)
-    
-    suit_output = cv2.bitwise_not(suit_padded)
+    suit_output = cv2.bitwise_not(suit_crop)
     suit_output[suit_output < 128] = 0
     suit_output[suit_output >= 128] = 255
     
     return suit_output
-    
-    return output, suit_output, color_type
 
 def process_cards(padding=2):
     output_dir = 'Card_Rank_Images'
