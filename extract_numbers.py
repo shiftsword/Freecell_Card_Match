@@ -1,54 +1,94 @@
 """
-FreeCell纸牌数字和花色提取模块
+FreeCell纸牌信息提取模块 (v3.0 - 整体裁切)
 
-图像特征:
-- 纸牌左上角包含数字和花色信息
-- 红色(红心♥和方块♦)和黑色(黑桃♠和梅花♣)两种颜色
-- 数字可能是单个字符(A,2-9,J,Q,K)或双字符(10)
-- 花色符号在数字正下方
-
-实现方法:
-1. 颜色识别
-   - 将图像转换为HSV颜色空间
-   - 提取左上角区域作为ROI
-   - 使用红色范围([0,100,100]-[10,255,255]和[170,100,100]-[180,255,255])创建红色掩码
-   - 使用黑色范围([0,0,0]-[180,255,50])创建黑色掩码
-   - 通过像素计数确定纸牌颜色类型
-
-2. 数字定位
-   - 合并红黑掩码
-   - 使用轮廓检测找到最大连通区域(通常是数字)
-   - 向左搜索可能的相连数字(处理10这种双字符)
-   - 添加适当的padding确保完整捕获数字
-
-3. 花色定位
-   - 在数字区域下方寻找花色符号
-   - 提取花色符号区域用于模板匹配
-
-4. 图像优化
-   - 应用形态学操作(膨胀和腐蚀)增强数字清晰度
-   - 转换为白底黑字格式，便于OCR识别
-   - 使用原始文件名加颜色标识(_r或_b)保存结果
+裁切卡片左上角信息区域（点数+花色），输出到单一目录。
+匹配时从整体图像中分割点数和花色分别匹配。
 """
 
 import cv2
 import numpy as np
 import os
 
-def extract_number(image_path, padding=2):
+
+def _detect_color(img):
+    """检测卡片颜色类型（红/黑）"""
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    h, w = img.shape[:2]
+    roi = hsv[0:int(h*0.5), 0:int(w*0.25)]
+    
+    red1 = cv2.inRange(roi, np.array([0, 100, 100]), np.array([10, 255, 255]))
+    red2 = cv2.inRange(roi, np.array([170, 100, 100]), np.array([180, 255, 255]))
+    red_mask = red1 + red2
+    glow = cv2.inRange(roi, np.array([15, 50, 150]), np.array([35, 255, 255]))
+    red_mask = cv2.bitwise_and(red_mask, cv2.bitwise_not(glow))
+    black_mask = cv2.inRange(roi, np.array([0, 0, 0]), np.array([180, 255, 50]))
+    return '_r' if cv2.countNonZero(red_mask) > cv2.countNonZero(black_mask) else '_b'
+
+
+def _binarize(region):
+    """转为白底黑字二值图"""
+    gray = cv2.cvtColor(region, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 128, 255, cv2.THRESH_BINARY_INV)
+    kernel = np.ones((2, 2), np.uint8)
+    binary = cv2.dilate(binary, kernel, iterations=1)
+    binary = cv2.erode(binary, kernel, iterations=1)
+    output = cv2.bitwise_not(binary)
+    output[output < 128] = 0
+    output[output >= 128] = 255
+    return output
+
+
+def extract_info_region(image_path):
+    """裁切卡片左上角信息区域（点数+花色整体）。
+    返回: (info_img, color_type) 或 None
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        return None
+    h, w = img.shape[:2]
+    color_type = _detect_color(img)
+    crop_w = int(w * 0.25)
+    region = img[0:h, 0:crop_w]
+    return _binarize(region), color_type
+
+
+def process_cards():
+    """处理所有卡片，提取信息区域到 Card_Info_Images（匹配用）"""
+    output_dir = 'Card_Info_Images'
+    os.makedirs(output_dir, exist_ok=True)
+    
+    cards_dir = 'Single_Card_Images'
+    if not os.path.exists(cards_dir):
+        return
+    
+    for filename in os.listdir(cards_dir):
+        if not filename.endswith('.png'):
+            continue
+        image_path = os.path.join(cards_dir, filename)
+        result = extract_info_region(image_path)
+        if result is None:
+            continue
+        info_img, color_type = result
+        name, ext = os.path.splitext(filename)
+        output_path = os.path.join(output_dir, f'{name}{color_type}{ext}')
+        cv2.imwrite(output_path, info_img)
+
+
+# ============================================================
+# 旧版提取（供模板创建工具使用）
+# ============================================================
+
+def _extract_number_legacy(image_path, padding=2):
     img = cv2.imread(image_path)
     if img is None:
         return None
     
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    
     height, width = img.shape[:2]
     roi_height = int(height/1.5)
     roi_width = int(width/4)
     roi = hsv[0:roi_height, 0:roi_width]
     
-    h, s, v = cv2.split(roi)
-
     lower_red1 = np.array([0, 100, 100])
     upper_red1 = np.array([10, 255, 255])
     lower_red2 = np.array([170, 100, 100])
@@ -60,7 +100,6 @@ def extract_number(image_path, padding=2):
     lower_glow = np.array([15, 50, 150])
     upper_glow = np.array([35, 255, 255])
     glow_mask = cv2.inRange(roi, lower_glow, upper_glow)
-
     red_mask = cv2.bitwise_and(red_mask, cv2.bitwise_not(glow_mask))
 
     lower_black = np.array([0, 0, 0])
@@ -75,7 +114,6 @@ def extract_number(image_path, padding=2):
     combined_mask = cv2.bitwise_and(combined_mask, cv2.bitwise_not(glow_mask))
     
     contours, _ = cv2.findContours(combined_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
     if not contours:
         return None
         
@@ -96,10 +134,7 @@ def extract_number(image_path, padding=2):
     y_end = min(roi_height, y + h + padding)
     
     number_region = combined_mask[y_start:y_end, x_start:x_end]
-    
     padded_region = np.zeros((y_end - y_start, x_end - x_start), dtype=np.uint8)
-    padded_region[:] = 0
-    
     padded_region[0:number_region.shape[0], 0:number_region.shape[1]] = number_region
     
     kernel = np.ones((2,2), np.uint8)
@@ -107,16 +142,14 @@ def extract_number(image_path, padding=2):
     padded_region = cv2.erode(padded_region, kernel, iterations=1)
     
     output = cv2.bitwise_not(padded_region)
-    
     output[output < 128] = 0
     output[output >= 128] = 255
     
-    suit_output = extract_suit_from_image(img, color_type)
-    
+    suit_output = _extract_suit_legacy(img, color_type)
     return output, suit_output, color_type
 
 
-def extract_suit_from_image(img, color_type):
+def _extract_suit_legacy(img, color_type):
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     height, width = img.shape[:2]
     
@@ -138,19 +171,17 @@ def extract_suit_from_image(img, color_type):
         upper_black = np.array([180, 255, 50])
         color_mask = cv2.inRange(hsv, lower_black, upper_black)
     
-    # 按卡片尺寸计算比例参数（参考: 149x58 卡片）
     all_mask = cv2.bitwise_or(color_mask, cv2.inRange(hsv, np.array([0,0,0]), np.array([180,255,50])))
     all_mask = cv2.bitwise_and(all_mask, cv2.bitwise_not(glow_mask))
     
-    scale = height / 58.0  # 相对于标准58像素高度的缩放比
-    rank_y_limit = int(height * 0.26)     # 标准: 15/58
-    rank_x_limit = int(width * 0.17)      # 标准: 25/149
-    min_area = int(30 * scale * scale)     # 标准: 30
-    default_rank_bottom = int(height * 0.47)  # 标准: 27/58
-    search_height = int(height * 0.38)     # 标准: 22/58
-    search_x_max = int(width * 0.20)       # 标准: 30/149
+    scale = height / 58.0
+    rank_y_limit = int(height * 0.26)
+    rank_x_limit = int(width * 0.17)
+    min_area = int(30 * scale * scale)
+    default_rank_bottom = int(height * 0.47)
+    search_height = int(height * 0.38)
+    search_x_max = int(width * 0.20)
 
-    # 步骤1: 找到点数区域底部（左上角轮廓）
     contours, _ = cv2.findContours(all_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     rank_bottom = 0
     for cnt in contours:
@@ -162,12 +193,10 @@ def extract_suit_from_image(img, color_type):
     if rank_bottom == 0:
         rank_bottom = default_rank_bottom
     
-    # 步骤2: 在点数下方、左半区域搜索花色符号
     search_start = rank_bottom + int(2 * scale)
     search_end = min(height, rank_bottom + search_height)
     suit_region = all_mask[search_start:search_end, 0:search_x_max]
     
-    # 步骤3: 找到花色像素的边界框
     points = cv2.findNonZero(suit_region)
     if points is None or len(points) < 5:
         suit_output = np.zeros((10, 10), dtype=np.uint8)
@@ -182,14 +211,14 @@ def extract_suit_from_image(img, color_type):
     x2 = min(search_x_max, x + cw + padding)
     
     suit_crop = all_mask[y1:y2, x1:x2]
-    
     suit_output = cv2.bitwise_not(suit_crop)
     suit_output[suit_output < 128] = 0
     suit_output[suit_output >= 128] = 255
-    
     return suit_output
 
-def process_cards(padding=2):
+
+def process_cards_legacy():
+    """旧版提取：分别输出到 Card_Rank_Images 和 Card_Suit_Images（模板创建用）"""
     output_dir = 'Card_Rank_Images'
     suit_output_dir = 'Card_Suit_Images'
     os.makedirs(output_dir, exist_ok=True)
@@ -198,23 +227,19 @@ def process_cards(padding=2):
     cards_dir = 'Single_Card_Images'
     if not os.path.exists(cards_dir):
         return
-        
-    image_files = [f for f in os.listdir(cards_dir) if f.endswith('.png')]
     
-    for filename in image_files:
+    for filename in os.listdir(cards_dir):
+        if not filename.endswith('.png'):
+            continue
         image_path = os.path.join(cards_dir, filename)
-        result = extract_number(image_path, padding)
+        result = _extract_number_legacy(image_path)
         if result is None:
             continue
-            
         number_img, suit_img, color_type = result
-        
         name, ext = os.path.splitext(filename)
-        number_path = os.path.join(output_dir, f'{name}{color_type}{ext}')
-        suit_path = os.path.join(suit_output_dir, f'{name}{color_type}{ext}')
-        
-        cv2.imwrite(number_path, number_img)
-        cv2.imwrite(suit_path, suit_img)
+        cv2.imwrite(os.path.join(output_dir, f'{name}{color_type}{ext}'), number_img)
+        cv2.imwrite(os.path.join(suit_output_dir, f'{name}{color_type}{ext}'), suit_img)
+
 
 if __name__ == "__main__":
     process_cards()

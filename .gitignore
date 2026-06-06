@@ -4,6 +4,10 @@ Card_Rank_Images/*
 Card_Suit_Images/*
 Single_Card_Images/*
 Card_Suit_Templates/*
+Card_Info_Temp/*
+Card_Info_Temp_1080p/*
+Card_Info_Images/*
+_test_work_*
 Card_Match_Result.log
 dist/*
 build/*

@@ -61,7 +61,7 @@ class FreecellOCRApp:
             self.update_result("✓ 纸牌分割完成，已保存到Single_Card_Images目录\n")
             
             self.update_status("准备模板: 提取数字和花色...")
-            extract_numbers.process_cards()
+            extract_numbers.process_cards_legacy()
             self.update_result("✓ 数字和花色提取完成，已保存到Card_Rank_Images和Card_Suit_Images目录\n")
             
             import create_templates
@@ -93,7 +93,7 @@ class FreecellOCRApp:
             messagebox.showerror("错误", f"启动模板创建工具失败: {str(e)}")
             self.update_status(f"处理失败: {str(e)}")
     def check_directories(self):
-        dirs = ["Single_Card_Images", "Card_Rank_Images", "Card_Suit_Images"]
+        dirs = ["Single_Card_Images", "Card_Info_Images"]
         for dir_name in dirs:
             if os.path.exists(dir_name):
                 for file in os.listdir(dir_name):
@@ -350,62 +350,46 @@ class FreecellOCRApp:
                     raise Exception(f"模板目录不存在: {template_dir}")
                 
                 self.update_status("步骤2/3: 提取数字和花色...")
-                extract_numbers.process_cards()
-                self.update_result("✓ 数字和花色提取完成，已保存到Card_Rank_Images和Card_Suit_Images目录\n")
+                extract_numbers.process_cards_legacy()
+                self.update_result("✓ 数字和花色提取完成\n")
                 
                 self.update_status("步骤3/3: 识别数字和花色并生成布局...")
                 
                 log_file = open("Card_Match_Result.log", "w", encoding="utf-8")
                 log_file.write("识别结果,文件名,点数,花色,匹配度,用时\n")
                 
-                results = []
-                start_time = time.time()
-                input_dir = 'Card_Rank_Images'
-                suit_dir = 'Card_Suit_Images'
-                image_files = sorted([f for f in os.listdir(input_dir) if f.endswith('.png')])
+                # 使用统一模板管理器批量匹配
+                rank_dir, suit_dir = match_numbers.resolve_template_dirs(template_set)
+                if rank_dir is None:
+                    raise Exception(f"未找到可用的点数模板集")
                 
-                for filename in image_files:
-                    rank_path = os.path.join(input_dir, filename)
-                    suit_path = os.path.join(suit_dir, filename)
+                self.update_result(f"模板集: rank={os.path.basename(rank_dir)}, suit={os.path.basename(suit_dir or 'N/A')}\n")
+                
+                results_v2, batch_time = match_numbers.process_all_cards_v2_legacy(
+                    rank_dir, suit_dir or '')
+                
+                results = []
+                for r in results_v2:
+                    number = r['number']
+                    suit = r['suit']
+                    color_simple = r['color']
+                    filename = r['filename']
+                    confidence = r['rank_confidence']
+                    card_time = r['time_ms']
                     
-                    number, confidence, match_count, process_time = match_numbers.match_card_rank(rank_path, template_dir)
-                    color_simple = 'r' if '_r.' in filename else 'b'
-                    
-                    suit = None
-                    suit_confidence = 0
-                    suit_time = 0
-                    if os.path.exists(suit_path):
-                        suit_template_dir = 'Card_Suit_Templates/set_1'
-                        if os.path.exists(suit_template_dir):
-                            suit, suit_confidence, suit_count, suit_time = match_numbers.match_card_suit(suit_path, suit_template_dir)
-                    
-                    if suit is None:
-                        if color_simple == 'r':
-                            suit = 'H'
-                        else:
-                            suit = 'S'
-                    
-                    log_line = f"识别成功: {filename} , {number}{suit} , [{confidence:.1f}%] , [{process_time + suit_time}ms]\n"
+                    log_line = f"识别成功: {filename} , {number}{suit} , [{confidence:.1f}%] , [{card_time}ms]\n"
                     if number is None:
-                        log_line = f"识别失败: {filename} , FAIL , [0.0%] , [{process_time + suit_time}ms]\n"
+                        log_line = f"识别失败: {filename} , FAIL , [0.0%] , [{card_time}ms]\n"
                     
                     log_file.write(log_line)
                     self.update_result(log_line.strip() + "\n")
                     
-                    if number:
-                        results.append({
-                            'number': number, 
-                            'suit': suit,
-                            'color': color_simple, 
-                            'filename': filename
-                        })
-                    else:
-                        results.append({
-                            'number': '?', 
-                            'suit': suit,
-                            'color': color_simple, 
-                            'filename': filename
-                        })
+                    results.append({
+                        'number': number if number else '?',
+                        'suit': suit,
+                        'color': color_simple,
+                        'filename': filename,
+                    })
                 
                 if results:
                     columns = match_numbers.results_to_columns(results)
@@ -479,7 +463,7 @@ class FreecellOCRApp:
         self.process_btn.config(state=tk.NORMAL)
         
     def clear_image_directories(self):
-        dirs = ["Single_Card_Images", "Card_Rank_Images", "Card_Suit_Images"]
+        dirs = ["Single_Card_Images", "Card_Info_Images"]
         for dir_name in dirs:
             if os.path.exists(dir_name):
                 for file in os.listdir(dir_name):
@@ -741,9 +725,9 @@ class CardViewerWindow:
     
     def load_cards(self):
         """加载并显示卡片图像"""
-        card_dir = "Card_Rank_Images"
+        card_dir = "Card_Info_Images"
         if not os.path.exists(card_dir):
-            messagebox.showinfo("提示", "Card_Rank_Images目录不存在")
+            messagebox.showinfo("提示", "Card_Info_Images目录不存在")
             return
         
         # 清空所有卡片标签
